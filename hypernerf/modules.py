@@ -17,6 +17,8 @@
 import functools
 from typing import Any, Optional, Tuple
 
+
+import torchsummary as summary #testing
 import torch
 import torch.nn as nn
 import numpy as np
@@ -216,21 +218,24 @@ class NerfMLP(nn.Module):
 
         #! Jun 26: x2 for concat the condition
         self.rgb_mlp = MLP(in_ch=self.trunk_width*2,out_ch=self.rgb_channels,
-            depth=self.gb_branch_depth,width=self.rgb_branch_width,skips=self.skips)
+            depth=self.gb_branch_depth,hidden_activation=self.activation, width=self.rgb_branch_width,skips=self.skips)
         self.alpha_mlp = MLP(in_ch=self.trunk_width*2,out_ch=self.alpha_channels,
-            depth=self.alpha_branch_depth,width=self.alpha_branch_width,skips=self.skips,output_activation=nn.Sigmoid())
+            depth=self.alpha_branch_depth,hidden_activation=self.activation,
+            width=self.alpha_branch_width,skips=self.skips,output_activation=nn.Sigmoid())
         
     def broadcast_condition(self,c,num_samples):
         # Broadcast condition from [batch, feature] to
         # [batch, num_coarse_samples, feature] since all the samples along the
         # same ray has the same viewdir.
-        c = c.unsqueeze(1).repeat(1,num_samples,1)
+        if c.dim() == 2:
+            c = c.unsqueeze(1)
+        c = c.repeat(1,num_samples,1)        
         # Collapse the [batch, num_coarse_samples, feature] tensor to
         # [batch * num_coarse_samples, feature] to be fed into nn.Dense.
         # c = c.view([-1, c.shape[-1]])
         return c
 
-    def forward(self,x, alpha_condition,rgb_condition):
+    def forward(self,x, alpha_condition = None,rgb_condition= None):
         """
             Args:
             x: sample points with shape [batch, num_coarse_samples, feature].
@@ -259,50 +264,103 @@ class NerfMLP(nn.Module):
         #todo reshape?
         return {'rgb':rgb,'alpha':alpha}
 
+#todo
+# class GLOEmbed(nn.Module):
+#   """A GLO encoder module, which is just a thin wrapper around nn.Embed.
+
+#   Attributes:
+#     num_embeddings: The number of embeddings.
+#     features: The dimensions of each embedding.
+#     embedding_init: The initializer to use for each.
+#   """
+
+#   num_embeddings: int = gin.REQUIRED
+#   num_dims: int = gin.REQUIRED
+#   embedding_init: types.Activation = nn.initializers.uniform(scale=0.05)
+
+#   def setup(self):
+#     self.embed = nn.Embed(
+#         num_embeddings=self.num_embeddings,
+#         features=self.num_dims,
+#         embedding_init=self.embedding_init)
+
+#   def __call__(self, inputs: jnp.ndarray) -> jnp.ndarray:
+#     """Method to get embeddings for specified indices.
+
+#     Args:
+#       inputs: The indices to fetch embeddings for. 
+
+#     Returns:
+#       The embeddings corresponding to the indices provided.
+#     """
+#     if inputs.shape[-1] == 1:
+#       inputs = jnp.squeeze(inputs, axis=-1)
+
+#     return self.embed(inputs)
+class GLOEmbed(nn.Module):
+    """A GLO encoder module, which is just a thin wrapper around nn.Embed.
+
+    Attributes:
+        num_embeddings: The number of embeddings.
+        features: The dimensions of each embedding.
+        embedding_init: The initializer to use for each.
+    """
+    def __init__(self):
+        super().__init__()
+        raise NotImplementedError
+
 
 class HyperSheetMLP(nn.Module):
-    def __init__(self,in_ch=3,out_ch=3,depth=6,width=64,skips=None):
+    def __init__(self,in_ch=3,in_ch_embed=21,out_ch=3,depth=6,width=64,min_deg=0,max_deg =1,skips=None):
         super(HyperSheetMLP, self).__init__()
-        self.in_ch = in_ch
         self.out_ch = out_ch
         self.depth = depth
         self.width = width
+        self.min_deg = min_deg
+        self.max_deg = max_deg
+        self.in_ch = model_utils.get_posenc_ch(in_ch,self.min_deg,self.max_deg,alpha=None) + in_ch_embed
         if skips is None:
             self.skips = [4,]
         else:
             self.skips = skips
-
+        self.hidden_init = nn.init.xavier_normal_
+        self.output_init = functools.partial(nn.init.normal_,std=1e-5)
         self.mlp = MLP(in_ch=self.in_ch,out_ch=self.out_ch,
-        depth=self.depth,hidden_init = nn.init.xavier_normal)
-        # todo. revise this
-        self.embedder,_ = model_utils.get_embedder(3,8)
+        depth=self.depth,hidden_init = self.hidden_init, 
+        output_init = self.output_init,width=self.width,
+        skips=self.skips)
 
 
     def forward(self,pts,embed,alpha = None):
-        points_feat = self.embedder(pts)
+        points_feat = model_utils.posenc(pts,self.min_deg,self.max_deg,alpha=alpha)#todo
         inputs = torch.cat([points_feat,embed],dim=-1)
         return self.mlp(inputs)
 
 if __name__ == "__main__":
     # test MLP
-    mlp = MLP(in_ch=3,out_ch=3,depth=8,width=256)
-    x = torch.randn(1,3,3)
+    device = torch.device('cuda:0')
+    mlp = MLP(in_ch=3,out_ch=3,depth=8,width=256).to(device)
+    x = torch.randn(1,3,3).cuda()
         
 
     print(mlp(x))
     # test NerfMLP
     nerf_mlp = NerfMLP(in_ch=3,out_ch=3,trunk_depth=8, trunk_width=256, 
                 gb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
-                alpha_brach_depth=0,alpha_brach_width=128,alpha_channels=1,skips=None)
-    x = torch.randn(1,3,3)
+                alpha_brach_depth=0,alpha_brach_width=128,alpha_channels=1,skips=None).to(device)
+    x = torch.randn(10,3,3).cuda()
     # (Batch, feature), (1,256)
-    alpha_condition = torch.rand(1,256)
-    rgb_condition = torch.randn(1,256)
+    alpha_condition = torch.rand(10,256).cuda()
+    rgb_condition = torch.randn(10,256).cuda()
     print(nerf_mlp(x,alpha_condition,rgb_condition))
 
     # test HyperSheetMLP
-    hyper_mlp = HyperSheetMLP(in_ch=3,out_ch=3,depth=6,width=64)
+
+    hyper_mlp = HyperSheetMLP(in_ch=3,in_ch_embed = 21,out_ch=3,depth=6,width=64)
+    hyper_mlp = hyper_mlp.to(device)
     x = torch.randn(1,3,3).cuda()
     embed = torch.randn(1,3,21).cuda()
     print(hyper_mlp(x,embed))
+    # summary.summary(hyper_mlp,[(1,3,3),(1,3,21)])
+    summary.summary(nerf_mlp,[(1,3,3),(1,1,256),(1,1,256)])
 # %%
