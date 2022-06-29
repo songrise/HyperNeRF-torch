@@ -173,7 +173,41 @@ class MLP(nn.Module):
 
 
 
+class GLOEmbed(nn.Module):
+    """A GLO encoder module, which is just a thin wrapper around nn.Embed.
 
+    Attributes:
+        num_embeddings: The number of embeddings.
+        features: The dimensions of each embedding.
+        embedding_init: The initializer to use for each.
+    """
+    def __init__(self, num_embeddings: int, features: int, embedding_init = None):
+        super(GLOEmbed, self).__init__()
+        self.num_embeddings = num_embeddings
+        self.features = features
+        if embedding_init is None:
+            # todo temp not used
+            pass
+            # self.embedding_init = nn.init.kaiming_normal_
+        self.embedding_init = embedding_init
+        self.embed = nn.Embedding(
+            num_embeddings=self.num_embeddings,
+            embedding_dim=self.features,
+            )
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Method to get embeddings for specified indices.
+
+        Args:
+        inputs: The indices to fetch embeddings for.
+
+        Returns:
+        The embeddings corresponding to the indices provided.
+        """
+        if inputs.shape[-1] == 1:
+            inputs = torch.squeeze(inputs, axis=-1)
+
+        return self.embed(inputs)
 
 
 
@@ -194,15 +228,17 @@ class NerfMLP(nn.Module):
         conditions the density of the field.
     """
 
-    def __init__(self,in_ch,out_ch,trunk_depth=8, trunk_width=256, 
-                gb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
-                alpha_brach_depth=1,alpha_brach_width=128,alpha_channels=1,skips=None,):
+    def __init__(self,in_ch,out_ch=3,trunk_depth=8, trunk_width=256, 
+                rgb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
+                alpha_brach_depth=1,alpha_brach_width=128,alpha_channels=1,
+                skips=None,hidden_activation=None,rgb_activation= None,
+                sigma_activation=None, norm=None):
         super(NerfMLP, self).__init__()
         self.in_ch = in_ch
-        self.out_ch = out_ch
+        self.out_ch = out_ch#todo remove
         self.trunk_depth = trunk_depth
         self.trunk_width = trunk_width
-        self.gb_branch_depth = gb_branch_depth
+        self.rgb_branch_depth = rgb_branch_depth
         self.rgb_branch_width = rgb_branch_width
         self.rgb_channels = rgb_channels
         self.alpha_branch_depth = alpha_brach_depth
@@ -211,10 +247,17 @@ class NerfMLP(nn.Module):
         self.condition_density = False
         if skips is None:
             self.skips = [4,]
-        else:
-            self.skips = skips
-        self.activation = nn.ReLU()
-        self.norm = nn.BatchNorm2d
+        self.skips = skips
+        if hidden_activation == None:
+            self.hidden_activation = nn.ReLU()
+        self.hidden_activation = hidden_activation
+        if rgb_activation == None:
+            self.rgb_activation = nn.Identity()
+        self.rgb_activation = rgb_activation
+        if sigma_activation == None:
+            self.sigma_activation = nn.Identity()
+        self.sigma_activation = sigma_activation
+        self.norm = norm
 
         #todo check this
         self.trunk_mlp = MLP(in_ch=self.in_ch,out_ch=self.trunk_width,depth=self.trunk_depth,
@@ -223,11 +266,23 @@ class NerfMLP(nn.Module):
         self.bottleneck_mlp = nn.Linear(self.trunk_width,self.trunk_width)
 
         #! Jun 26: x2 for concat the condition
-        self.rgb_mlp = MLP(in_ch=self.trunk_width*2,out_ch=self.rgb_channels,
-            depth=self.gb_branch_depth,hidden_activation=self.activation, width=self.rgb_branch_width,skips=self.skips)
-        self.alpha_mlp = MLP(in_ch=self.trunk_width*2,out_ch=self.alpha_channels,
-            depth=self.alpha_branch_depth,hidden_activation=self.activation,
-            width=self.alpha_branch_width,skips=self.skips,output_activation=nn.Sigmoid())
+        # todo check in dimension
+        self.rgb_mlp = MLP(in_ch=self.trunk_width*2,
+                            out_ch=self.rgb_channels,
+                            depth=self.rgb_branch_depth,
+                            hidden_activation=self.hidden_activation,
+                            output_activation=self.rgb_activation, 
+                            width=self.rgb_branch_width,
+                            skips=self.skips)
+            
+        self.alpha_mlp = MLP(in_ch=self.trunk_width*2,
+                                out_ch=self.alpha_channels,
+                                depth=self.alpha_branch_depth,
+                                hidden_activation=self.hidden_activation, 
+                                output_activation=self.sigma_activation,
+                                width=self.alpha_branch_width,
+                                skips=self.skips,
+                                )
         
     def broadcast_condition(self,c,num_samples):
         # Broadcast condition from [batch, feature] to
@@ -270,50 +325,6 @@ class NerfMLP(nn.Module):
         #todo reshape?
         return {'rgb':rgb,'alpha':alpha}
 
-#todo
-# class GLOEmbed(nn.Module):
-#   """A GLO encoder module, which is just a thin wrapper around nn.Embed.
-
-#   Attributes:
-#     num_embeddings: The number of embeddings.
-#     features: The dimensions of each embedding.
-#     embedding_init: The initializer to use for each.
-#   """
-
-#   num_embeddings: int = gin.REQUIRED
-#   num_dims: int = gin.REQUIRED
-#   embedding_init: types.Activation = nn.initializers.uniform(scale=0.05)
-
-#   def setup(self):
-#     self.embed = nn.Embed(
-#         num_embeddings=self.num_embeddings,
-#         features=self.num_dims,
-#         embedding_init=self.embedding_init)
-
-#   def __call__(self, inputs: jnp.ndarray) -> jnp.ndarray:
-#     """Method to get embeddings for specified indices.
-
-#     Args:
-#       inputs: The indices to fetch embeddings for. 
-
-#     Returns:
-#       The embeddings corresponding to the indices provided.
-#     """
-#     if inputs.shape[-1] == 1:
-#       inputs = jnp.squeeze(inputs, axis=-1)
-
-#     return self.embed(inputs)
-class GLOEmbed(nn.Module):
-    """A GLO encoder module, which is just a thin wrapper around nn.Embed.
-
-    Attributes:
-        num_embeddings: The number of embeddings.
-        features: The dimensions of each embedding.
-        embedding_init: The initializer to use for each.
-    """
-    def __init__(self):
-        super().__init__()
-        raise NotImplementedError
 
 
 class HyperSheetMLP(nn.Module):
