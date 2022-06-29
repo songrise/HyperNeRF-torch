@@ -26,7 +26,7 @@ import numpy as np
 import model_utils
 # from hypernerf import types
 
-def get_norm_layer(norm_type):
+def get_norm_layer(norm_type:str,channels:int):
     """Returns a norm layer.
     Args:
         norm_type: A string indicating the type of norm layer to return.
@@ -34,11 +34,12 @@ def get_norm_layer(norm_type):
         A norm layer.
     """
     if norm_type == 'batch':
-        return torch.nn.BatchNorm2d
+        return nn.BatchNorm2d(num_features=channels)
     elif norm_type == 'instance':
-        return torch.nn.InstanceNorm2d
+        return nn.InstanceNorm2d(num_features=channels)
     else:
-        return torch.nn.BatchNorm2d
+        raise ValueError('Unknown norm type: {}'.format(norm_type))
+        return None
 
 class Dense(nn.Module):
     """A dense layer."""
@@ -122,6 +123,7 @@ class MLP(nn.Module):
             self.hidden_activations = hidden_activation
 
         self.hidden_norm = hidden_norm
+
         if output_init is None:
             self.output_init = nn.init.kaiming_normal_
         else:
@@ -132,6 +134,7 @@ class MLP(nn.Module):
             self.output_activation = nn.Identity()
         else:
             self.output_activation = output_activation
+
         self.use_bias = use_bias
         if skips is None:
             self.skips = [4,]
@@ -150,15 +153,18 @@ class MLP(nn.Module):
         if self.output_init is not None:
             self.output_init(self.logit_layer.weight)
 
-        # self.norms = nn.ModuleList([nn.BatchNorm1d(width) for i in range(depth)])
+        if self.hidden_norm is not None:
+            #TODO
+            pass
+            # self.norm_layers = nn.ModuleList([get_norm_layer(self.hidden_norm) for _ in range(depth)])
 
-    
     def forward(self,inputs):
         x = inputs
         for i, linear in enumerate(self.linears):
             x = linear(x)
-            # x = norm(x)
             x = self.hidden_activations(x)
+            # if self.hidden_norm is not None:
+            #     x = self.norm_layers[i](x)
             if i in self.skips:
                 x = torch.cat([x,inputs],-1)
         x = self.logit_layer(x)

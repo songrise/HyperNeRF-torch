@@ -13,6 +13,7 @@
 # limitations under the License.
 #%%
 """Warp fields."""
+import functools
 from typing import Any, Iterable, Optional, Dict
 from functools import partial
 import torch 
@@ -29,10 +30,87 @@ import modules
 import rigid_body as rigid
 import types
 class TranslationField(nn.Module):
-    def __init__(self):
-        super().__init__()
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+    def __init__(self,in_ch,min_deg=0,max_deg=8, use_posenc_identity=True,
+                skips=None,depth=6,hidden_channels=128,activation=None,norm=None,hidden_init=None,
+                output_init=None):
+        super(TranslationField,self).__init__()
+        self.in_ch = model_utils.get_posenc_ch(in_ch,min_deg=min_deg,
+                                    max_deg=max_deg,
+                                    use_identity=use_posenc_identity)
+        self.min_deg = min_deg
+        self.max_deg = max_deg
+        self.use_posenc_identity = use_posenc_identity
+    
+        if skips is None:
+            skips = [4,]
+        self.skips = skips
+        self.depth = depth
+        self.hidden_channels = hidden_channels
+        if activation is None:
+            activation = nn.ReLU()
+        self.activation = activation
+        self.norm = norm
+        if hidden_init is None:
+            hidden_init = nn.init.xavier_normal_
+        self.hidden_init = hidden_init
+        if output_init is None:
+            output_init = functools.partial(nn.init.uniform_,b=1e-4)
+        self.output_init = output_init
+
+        self.out_ch = 3
+        self.mlp = modules.MLP(
+            in_ch=self.in_ch,
+            out_ch=self.out_ch,
+            depth=self.depth,
+            width=self.hidden_channels,
+            hidden_activation=self.activation,
+            hidden_norm=self.norm,
+            hidden_init=self.hidden_init,
+            output_init=self.output_init,
+            skips=self.skips,
+        )
+        
+    def warp(self,points:torch.Tensor,metadata:torch.Tensor,extra_params) -> torch.Tensor:
+        points_embed = model_utils.posenc(points,
+                                    min_deg=self.min_deg,
+                                    max_deg=self.max_deg,
+                                    use_identity=self.use_posenc_identity,
+                                    alpha=extra_params['warp_alpha'])
+        # TODO check what is metadata
+        # inputs = torch.cat([points_embed,metadata],dim=-1)
+        inputs = points_embed
+        translation = self.mlp(inputs)
+        warped_points = points + translation
+
+        return warped_points
+    
+    def forward(self,
+               points: torch.Tensor,
+               metadata: torch.Tensor,
+               extra_params,
+               return_jacobian: bool = False):
+        """Warp the given points using a warp field.
+
+        Args:
+        points: the points to warp.
+        metadata: encoded metadata features.
+        extra_params: extra parameters used in the warp field e.g., the warp
+            alpha.
+        return_jacobian: if True compute and return the Jacobian of the warp.
+
+        Returns:
+        The warped points and the Jacobian of the warp if `return_jacobian` is
+            True.
+        """
+        out = {
+            'warped_points': self.warp(points, metadata, extra_params)
+        }
+
+        if return_jacobian:
+            raise NotImplementedError
+            # jac_fn = jax.jacfwd(lambda *x: self.warp(*x)[..., :3], argnums=0)
+            # out['jacobian'] = jac_fn(points, metadata, extra_params)
+        return out
 
 
 class SE3Field(nn.Module):
@@ -188,5 +266,10 @@ if __name__ == '__main__':
     model = SE3Field(in_ch=3).to(device)
     res = model(inputs,torch.randn(1,1,3).cuda(),{'warp_alpha':0.5})    
     print(res['warped_points'].shape)
-    import torchsummary
-    torchsummary.summary(model,[(1,1,3),(1,1,3),{'warp_alpha':0.5}])
+    # import torchsummary
+    # torchsummary.summary(model,[(1,1,3),(1,1,3),{'warp_alpha':0.5}])
+
+    #test translation
+    model = TranslationField(in_ch=3,norm="batch").to(device)
+    res = model(inputs,torch.randn(1,1,3).cuda(),{'warp_alpha':0.5})
+    print(res['warped_points'].shape)
