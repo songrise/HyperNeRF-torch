@@ -80,7 +80,7 @@ def volumetric_rendering(device,
     alpha = 1.0 - torch.exp(-sigma * dists)
     # Prepend a 1.0 to make this an 'exclusive' cumprod as in `tf.math.cumprod`.
     accum_prod = torch.cat([
-        torch.ones_like(alpha[..., :1], alpha.dtype,device=device),
+        torch.ones_like(alpha[..., :1], device=device),
         torch.cumprod(1.0 - alpha[..., :-1] + eps, dim=-1),
     ], dim=-1)
     weights = alpha * accum_prod

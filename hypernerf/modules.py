@@ -181,10 +181,10 @@ class GLOEmbed(nn.Module):
         features: The dimensions of each embedding.
         embedding_init: The initializer to use for each.
     """
-    def __init__(self, num_embeddings: int, features: int, embedding_init = None):
+    def __init__(self, num_embeddings: int, embedding_dim: int, embedding_init = None):
         super(GLOEmbed, self).__init__()
         self.num_embeddings = num_embeddings
-        self.features = features
+        self.embedding_dim = embedding_dim
         if embedding_init is None:
             # todo temp not used
             pass
@@ -192,7 +192,7 @@ class GLOEmbed(nn.Module):
         self.embedding_init = embedding_init
         self.embed = nn.Embedding(
             num_embeddings=self.num_embeddings,
-            embedding_dim=self.features,
+            embedding_dim=self.embedding_dim,
             )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
@@ -263,19 +263,20 @@ class NerfMLP(nn.Module):
         self.trunk_mlp = MLP(in_ch=self.in_ch,out_ch=self.trunk_width,depth=self.trunk_depth,
             width=self.trunk_width)
 
-        self.bottleneck_mlp = nn.Linear(self.trunk_width,self.trunk_width)
+        self.bottleneck_mlp = nn.Linear(self.trunk_width,self.trunk_width//2)#128
 
         #! Jun 26: x2 for concat the condition
         # todo check in dimension
-        self.rgb_mlp = MLP(in_ch=self.trunk_width*2,
+        # todo assume have rgb conditioning, HARDCODED!
+        self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+24,
                             out_ch=self.rgb_channels,
                             depth=self.rgb_branch_depth,
                             hidden_activation=self.hidden_activation,
                             output_activation=self.rgb_activation, 
                             width=self.rgb_branch_width,
                             skips=self.skips)
-            
-        self.alpha_mlp = MLP(in_ch=self.trunk_width*2,
+        #todo assume no alpha conditioning (256)
+        self.alpha_mlp = MLP(in_ch=self.trunk_width,
                                 out_ch=self.alpha_channels,
                                 depth=self.alpha_branch_depth,
                                 hidden_activation=self.hidden_activation, 
@@ -313,7 +314,8 @@ class NerfMLP(nn.Module):
             alpha_input = torch.cat([bottleneck,alpha_condition],dim=-1)
         else:
             alpha_input = x
-
+        # todo when assuming no alpha conditioning,
+        # the input to alpha_mlp should be the bottleneck,ie 256
         alpha = self.alpha_mlp(alpha_input)
 
         if rgb_condition is not None:
@@ -328,13 +330,14 @@ class NerfMLP(nn.Module):
 
 
 class HyperSheetMLP(nn.Module):
-    def __init__(self,in_ch=3,in_ch_embed=21,out_ch=3,depth=6,width=64,min_deg=0,max_deg =1,skips=None):
+    def __init__(self,in_ch=3,in_ch_embed=8,out_ch=3,depth=6,width=64,min_deg=0,max_deg =1,skips=None):
         super(HyperSheetMLP, self).__init__()
         self.out_ch = out_ch
         self.depth = depth
         self.width = width
         self.min_deg = min_deg
         self.max_deg = max_deg
+        self.in_ch_embed = in_ch_embed # default is 8 according to the paper
         self.in_ch = model_utils.get_posenc_ch(in_ch,self.min_deg,self.max_deg,alpha=None) + in_ch_embed
         if skips is None:
             self.skips = [4,]

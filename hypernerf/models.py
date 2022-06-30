@@ -16,6 +16,7 @@
 from cmath import e
 import functools
 
+
 from typing import Any, Callable, Dict, Optional, Tuple, Sequence, Mapping
 import immutabledict
 import torch
@@ -111,7 +112,7 @@ class NerfModel(nn.Module):
     def __init__(self,device,embeddings_dict,near:float,far:float):
         super(NerfModel,self).__init__()
         self.device = device
-        self.embeddings_dict: Mapping[str, Sequence[int]] 
+        self.embeddings_dict: Mapping[str, Sequence[int]] = embeddings_dict
         self.near: float = 0.0
         self.far: float = 1.0
 
@@ -138,7 +139,7 @@ class NerfModel(nn.Module):
         self.hyper_point_max_deg: int = 4
         self.viewdir_min_deg: int = 0
         self.viewdir_max_deg: int = 4
-        self.use_posenc_identity: bool = True
+        self.use_posenc_identity: bool = False
 
         self.alpha_channels: int = 1
         self.rgb_channels: int = 3
@@ -154,7 +155,7 @@ class NerfModel(nn.Module):
         self.nerf_embed_key: str = 'appearance'
         self.use_alpha_condition: bool = False
         self.use_rgb_condition: bool = False
-        self.hyper_slice_method: str = 'none'
+        self.hyper_slice_method: str = 'bendy_sheet'
         self.hyper_embed_cls: Callable[..., nn.Module] = (
             functools.partial(modules.GLOEmbed, num_dims=8))
         self.hyper_embed_key: str = 'appearance'
@@ -162,12 +163,13 @@ class NerfModel(nn.Module):
         #! Jun 25: the mlp to slice
         self.hyper_sheet_mlp_cls: Callable[..., nn.Module] = modules.HyperSheetMLP
         self.hyper_sheet_use_input_points: bool = True
+        self.hyper_sheet_out_dim: int = 4 # the output dimension of the hypernet
 
         # Warp configs.
-        self.use_warp: bool = False
+        self.use_warp: bool = True
         self.warp_field_cls: Callable[..., nn.Module] = warping.TranslationField #! please change to SE3Field if needed
         self.warp_embed_cls: Callable[..., nn.Module] = (
-            functools.partial(modules.GLOEmbed, num_dims=8))
+            functools.partial(modules.GLOEmbed, embedding_dim=8))
         self.warp_embed_key: str = 'warp'
 
 
@@ -179,39 +181,42 @@ class NerfModel(nn.Module):
 
         if self.use_nerf_embed:
             self.nerf_embed = self.nerf_embed_cls(
-                num_embeddings=self.num_nerf_embeds)
+                num_embeddings=max(self.embeddings_dict[self.nerf_embed_key]) + 1)
         if self.use_warp:
             self.warp_embed = self.warp_embed_cls(
-                num_embeddings=self.num_warp_embeds)
+                num_embeddings=max(self.embeddings_dict[self.warp_embed_key]) + 1)
 
         if self.hyper_slice_method == 'axis_aligned_plane':
             self.hyper_embed = self.hyper_embed_cls(
-                num_embeddings=self.num_hyper_embeds)
+                num_embeddings=max(self.embeddings_dict[self.hyper_embed_key]) + 1)
         elif self.hyper_slice_method == 'bendy_sheet':
             if not self.hyper_use_warp_embed:
                 self.hyper_embed = self.hyper_embed_cls(
-                    num_embeddings=self.num_hyper_embeds)
-            self.hyper_sheet_mlp = self.hyper_sheet_mlp_cls()
+                    num_embeddings=max(self.embeddings_dict[self.hyper_embed_key]) + 1)
+            self.hyper_sheet_mlp = self.hyper_sheet_mlp_cls(out_ch=self.hyper_sheet_out_dim)
 
         if self.use_warp:
-            self.warp_field = self.warp_field_cls()
-
+            self.warp_field = self.warp_field_cls(in_ch=3)# 3 for xyz
+        
+        self.alpha_default = 0.0
         # calculate the dimension of the input
         point_feat_ch = model_utils.get_posenc_ch(3, 
             min_deg=self.spatial_point_min_deg,
             max_deg=self.spatial_point_max_deg,
             use_identity=self.use_posenc_identity,
-            alpha=None)
+            alpha=self.alpha_default)
         viewdir_feat_ch = model_utils.get_posenc_ch(3,
             min_deg=self.viewdir_min_deg,
             max_deg=self.viewdir_max_deg,
             use_identity=self.use_posenc_identity,
-            alpha=None)
-        hyper_feat_ch = model_utils.get_posenc_ch(3,
+            alpha=self.alpha_default)
+
+        hyper_feat_ch = model_utils.get_posenc_ch(self.hyper_sheet_out_dim,
             min_deg=self.hyper_point_min_deg,
             max_deg=self.hyper_point_max_deg,
-            use_identity=self.use_posenc_identity,
-            alpha=None)
+            use_identity=False, #do not preserve the raw
+            alpha=self.alpha_default)
+        # todo check this
         self.in_ch_pos = point_feat_ch + hyper_feat_ch
 
         #TODO temp not used
@@ -394,7 +399,8 @@ class NerfModel(nn.Module):
             use_identity=self.use_posenc_identity,
             alpha=extra_params['nerf_alpha'])
         # Encode hyper-points if present.
-        if points.shape[-1] > 3:
+        # todo check what is hyper-point
+        if points.shape[-1] > 3: # when the dimension of points is larger than 3
             hyper_feats = model_utils.posenc(
                 points[..., 3:],
                 min_deg=self.hyper_point_min_deg,
@@ -404,9 +410,9 @@ class NerfModel(nn.Module):
             points_feat = torch.cat([points_feat, hyper_feats], dim=-1)
         # todo check the dtype of level
         if level == 'fine':
-            raw = self.nerf_mlps_fine(points_feat, rgb_condition, alpha_condition)
+            raw = self.nerf_mlps_fine(points_feat, alpha_condition=alpha_condition, rgb_condition=rgb_condition)
         else:
-            raw = self.nerf_mlps_coarse(points_feat, rgb_condition, alpha_condition)
+            raw = self.nerf_mlps_coarse(points_feat, alpha_condition=alpha_condition, rgb_condition=rgb_condition)
         # raw = self.nerf_mlps[level](
         #     points_feat, alpha_condition, rgb_condition)
         raw = model_utils.noise_regularize(
@@ -427,13 +433,22 @@ class NerfModel(nn.Module):
             # todo perhaps rewrite use loop
             # warp_fn = jax.vmap(jax.vmap(self.warp_field, in_axes=(0, 0, None, None)),
             #                    in_axes=(0, 0, None, None))
-            warp_out = warp_fn(points,
-                               warp_embed,
-                               extra_params,
-                               return_warp_jacobian)
+            # warp_out = warp_fn(points,
+            #                    warp_embed,
+            #                    extra_params,
+            #                    return_warp_jacobian)
+            warp_out ={"jacobian":[], "warped_points" :[]}
+            for i in range(points.shape[0]):
+                # assume always not return jacobian
+                warp_out["warped_points"] += [self.warp_field(points[i],
+                                           warp_embed[i],
+                                           extra_params,
+                                           return_jacobian=False)['warped_points']]
             if return_warp_jacobian:
                 warp_jacobian = warp_out['jacobian']
             warped_points = warp_out['warped_points']
+            # stack into a tensor
+            warped_points = torch.stack(warped_points, dim=0)
         else:
             warped_points = points
 
@@ -496,7 +511,7 @@ class NerfModel(nn.Module):
             points, hyper_embed, extra_params,
             # Override hyper points if present in metadata dict.
             hyper_point_override=hyper_point_override)
-
+        # todo check in jax the dim of hyper_points
         if hyper_points is not None:
             warped_points = torch.cat(
                 [spatial_points, hyper_points], dim=-1)
@@ -578,6 +593,7 @@ class NerfModel(nn.Module):
             out['warp_jacobian'] = warp_jacobian
         out['warped_points'] = warped_points
         out.update(model_utils.volumetric_rendering(
+            self.device,
             rgb,
             sigma,
             z_vals,
@@ -751,12 +767,13 @@ if __name__ == '__main__':
     device = torch.device('cuda:0')
     rays={'origins': torch.Tensor([[0,0,0],[0,0,0]]).to(device),
         'directions': torch.Tensor([[1,0,0],[0,1,0]]).to(device),
-        'metadata': {'warp': torch.Tensor([[0],[0]]).to(device),
-                        'camera': torch.Tensor([[0],[0]]).to(device),
-                        'appearance': torch.Tensor([[0],[0]]).to(device),
-                        'time': torch.Tensor([[0],[0]]).to(device)}}
-    embeddings_dict = {'warp': 1, 'camera': 1, 'appearance': 1, 'time': 1}
+        'metadata': {'warp': torch.Tensor([[0],[0]]).type(torch.long).to(device),
+                        'camera': torch.Tensor([[0],[0]]).type(torch.long).to(device),
+                        'appearance': torch.Tensor([[0],[0]]).type(torch.long).to(device),
+                        'time': torch.Tensor([[0],[0]]).type(torch.long).to(device)}}
+    embeddings_dict = {'warp': [1,2,3], 'camera':[1,2,3], 'appearance': [1,2,3], 'time': [1,2,3]}
     model, params = construct_nerf(device, batch_size=2, embeddings_dict=embeddings_dict, near=0.1, far=10)
+    model = model.to(device)
     extra_params = {
         'nerf_alpha': 0.0,
         'warp_alpha': 0.0,
