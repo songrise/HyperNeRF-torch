@@ -87,7 +87,7 @@ def volumetric_rendering(device,
 
     rgb = (weights[..., None] * rgb).sum(dim=-2)
     exp_depth = (weights * z_vals).sum(dim=-1)
-    med_depth = compute_depth_map(weights, z_vals)
+    med_depth = compute_depth_map(device, weights, z_vals)
     acc = weights.sum(dim=-1)
     if use_white_background:
         rgb = rgb + (1. - acc[..., None])
@@ -137,9 +137,9 @@ def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
     mask = (u[..., None, :] >= cdf[..., :, None])
 
     def minmax(x):
-        #todo check
-        x0 = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), -2)
-        x1 = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), -2)
+        #todo check whether keep dim
+        x0,_ = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), dim=-2)
+        x1,_ = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), dim=-2)
         x0 = torch.minimum(x0, x[..., -2:-1])
         x1 = torch.maximum(x1, x[..., 1:2])
         return x0, x1
@@ -148,7 +148,8 @@ def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
     cdf_g0, cdf_g1 = minmax(cdf)
 
     denom = (cdf_g1 - cdf_g0)
-    denom = torch.where(denom < eps, 1., denom)
+    one_ =torch.scalar_tensor(1.,device=device)
+    denom = torch.where(denom < eps, one_, denom)
     t = (u - cdf_g0) / denom
     z_samples = bins_g0 + t * (bins_g1 - bins_g0)
 
@@ -178,7 +179,8 @@ def sample_pdf(device, bins, weights, origins, directions, z_vals,
     z_samples = piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
                                         use_stratified_sampling)
     # Compute united z_vals and sample points
-    z_vals = torch.sort(torch.cat([z_vals, z_samples], dim=-1), dim=-1)
+    z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], dim=-1), dim=-1)
+    #! shape [N,3] []
     return z_vals, (
         origins[..., None, :] + z_vals[..., None] * directions[..., None, :])
 
@@ -295,7 +297,7 @@ def noise_regularize(raw, noise_std, use_stratified_sampling):
         raw = torch.cat([raw[..., :3], raw[..., 3:4] + noise], dim=-1)
     return raw
 
-def compute_opaqueness_mask(device,weights, depth_threshold=0.5):
+def compute_opaqueness_mask(device, weights, depth_threshold=0.5):
     """Computes a mask which will be 1.0 at the depth point.
 
     Args:
@@ -323,7 +325,7 @@ def compute_depth_index(device,weights, depth_threshold=0.5):
     opaqueness_mask = compute_opaqueness_mask(device, weights, depth_threshold)
     return torch.argmax(opaqueness_mask, axis=-1)
 
-def compute_depth_map(weights, z_vals, depth_threshold=0.5):
+def compute_depth_map(device, weights, z_vals, depth_threshold=0.5):
     """Compute the depth using the median accumulation.
 
     Note that this differs from the depth computation in NeRF-W's codebase!
@@ -337,7 +339,7 @@ def compute_depth_map(weights, z_vals, depth_threshold=0.5):
     Returns:
         A tensor containing the depth of each input pixel.
     """
-    opaqueness_mask = compute_opaqueness_mask(weights, depth_threshold)
+    opaqueness_mask = compute_opaqueness_mask(device, weights, depth_threshold)
     return torch.sum(opaqueness_mask * z_vals, dim=-1)
 
 if __name__ == '__main__':

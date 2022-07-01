@@ -781,3 +781,4 @@ if __name__ == '__main__':
         'hyper_sheet_alpha': 0.0,
     }
     out = model(rays, extra_params)
+    print(out)
