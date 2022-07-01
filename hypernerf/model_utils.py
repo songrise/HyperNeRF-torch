@@ -2,7 +2,6 @@ import torch
 # torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 def sample_along_rays(device,origins, directions, num_coarse_samples, near, far,
                       use_stratified_sampling, use_linear_disparity):
@@ -280,7 +279,7 @@ def posenc_window(min_deg, max_deg, alpha):
     x = torch.clamp(alpha - bands, 0.0, 1.0)
     return 0.5 * (1 + torch.cos(3.1416926 * x + 3.1416926))
 
-def noise_regularize(raw, noise_std, use_stratified_sampling):
+def noise_regularize(device, raw, noise_std, use_stratified_sampling):
     """Regularize the density prediction by adding gaussian noise.
 
     Args:
@@ -293,7 +292,7 @@ def noise_regularize(raw, noise_std, use_stratified_sampling):
         raw: jnp.ndarray(float32), [batch_size, num_coarse_samples, 4], updated raw.
     """
     if (noise_std is not None) and noise_std > 0.0 and use_stratified_sampling:
-        noise = torch.rand(raw[..., 3:4].shape, dtype=raw.dtype) * noise_std
+        noise = torch.rand(raw[..., 3:4].shape, dtype=raw.dtype,device=device) * noise_std
         raw = torch.cat([raw[..., :3], raw[..., 3:4] + noise], dim=-1)
     return raw
 
@@ -341,6 +340,67 @@ def compute_depth_map(device, weights, z_vals, depth_threshold=0.5):
     """
     opaqueness_mask = compute_opaqueness_mask(device, weights, depth_threshold)
     return torch.sum(opaqueness_mask * z_vals, dim=-1)
+
+
+def prepare_ray_dict(rays:torch.Tensor)->dict:
+    """convert the nerf-pl ray tensor into a dictionary, so that it is 
+       compatible with the hypernerf forward pass.
+    
+        Args:
+        rays: the ray tensor, with shape (batch_size*num_samples, 8),
+                 8 for raydir,orig,near,far.
+        Returns:
+        rays_dict: a dictionary containing the ray information. Contains:
+                    'origins': the ray origins.
+                    'directions': unit vectors which are the ray directions.
+                    'viewdirs': (optional) unit vectors which are viewing directions.
+                    'metadata': a dictionary of metadata indices e.g., for warping.
+    """
+    #TODO currently asuming the rays are of the same near, far.
+    if len(rays.shape) > 2:
+        #if in [B, N, 8] format, flatten
+        rays = rays.view(-1, 8)
+    dir = rays[:,:3]
+    orig = rays[:,3:6]
+    near = rays[0,6]
+    far = rays[0,7]
+    #todo: temporarily forge the metadata
+    metadata= {'warp': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device),
+                        'camera': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device),
+                        'appearance': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device),
+                        'time': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device)}
+    
+    return {"origins": orig,
+            "directions": dir,
+            "viewdirs": None,
+            "metadata": metadata}
+   
+
+def extract_rays_batch(rays:dict,start:int,end:int,drop_last=True)->dict:
+    """
+        extract ray batches from the ray dict.
+        Args:
+        rays: the ray dict.
+        start: the start index of the batch.
+        end: the end index of the batch.
+        drop_last: if true, the last batch will be dropped.
+        Returns:
+        rays_batch: the extracted batch.
+    """
+    rays_batch = {k:None for k in rays.keys()}
+    for key in rays.keys():
+        if key == 'metadata':
+            rays_batch[key] = rays[key]
+        else:
+            if rays[key] is not None:
+                rays_batch[key] = rays[key][start:end]
+            
+    return rays_batch
+
+
+
+
+
 
 if __name__ == '__main__':
     pass

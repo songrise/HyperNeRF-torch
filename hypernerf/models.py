@@ -21,16 +21,14 @@ from typing import Any, Callable, Dict, Optional, Tuple, Sequence, Mapping
 import immutabledict
 import torch
 import torch.nn as nn
-# from hypernerf import model_utils
-# from hypernerf import modules
-# from hypernerf import types
+
 # # pylint: disable=unused-import
 # from hypernerf import warping
-import model_utils
-import modules
+from hypernerf import model_utils
+from hypernerf import modules
 # import types
 # pylint: disable=unused-import
-import warping
+from hypernerf import warping
 
 # 
 def filter_sigma(points, sigma, render_opts):
@@ -109,16 +107,20 @@ class NerfModel(nn.Module):
       warp_min_deg: min degree of positional encoding for warps.
       warp_max_deg: max degree of positional encoding for warps.
     """
-    def __init__(self,device,embeddings_dict,near:float,far:float):
+    def __init__(self,device,embeddings_dict,
+            near:float=0.0, far:float=1.0, 
+            n_samples_coarse:int=64, n_samples_fine:int = 128,
+            noise_std:float=None):
+
         super(NerfModel,self).__init__()
         self.device = device
         self.embeddings_dict: Mapping[str, Sequence[int]] = embeddings_dict
-        self.near: float = 0.0
-        self.far: float = 1.0
+        self.near = near
+        self.far = far
 
         # NeRF architecture.
         self.use_viewdirs: bool = True
-        self.noise_std: Optional[float] = None
+        self.noise_std = noise_std
         self.nerf_trunk_depth: int = 8
         self.nerf_trunk_width: int = 256
         self.nerf_rgb_branch_depth: int = 1
@@ -126,8 +128,8 @@ class NerfModel(nn.Module):
         self.nerf_skips: Tuple[int] = (4,)
 
         # NeRF rendering.
-        self.num_coarse_samples: int = 128
-        self.num_fine_samples: int = 128
+        self.num_coarse_samples = n_samples_coarse
+        self.num_fine_samples = n_samples_fine
         self.use_stratified_sampling: bool = True
         self.use_white_background: bool = False
         self.use_linear_disparity: bool = False
@@ -185,15 +187,20 @@ class NerfModel(nn.Module):
         if self.use_warp:
             self.warp_embed = self.warp_embed_cls(
                 num_embeddings=max(self.embeddings_dict[self.warp_embed_key]) + 1)
+            self.warp_embed = self.warp_embed.to(self.device)
 
         if self.hyper_slice_method == 'axis_aligned_plane':
             self.hyper_embed = self.hyper_embed_cls(
                 num_embeddings=max(self.embeddings_dict[self.hyper_embed_key]) + 1)
+            self.hyper_embed = self.hyper_embed.to(self.device)
+
         elif self.hyper_slice_method == 'bendy_sheet':
             if not self.hyper_use_warp_embed:
                 self.hyper_embed = self.hyper_embed_cls(
                     num_embeddings=max(self.embeddings_dict[self.hyper_embed_key]) + 1)
+                self.hyper_embed = self.hyper_embed.to(self.device)
             self.hyper_sheet_mlp = self.hyper_sheet_mlp_cls(out_ch=self.hyper_sheet_out_dim)
+            self.hyper_sheet_mlp = self.hyper_sheet_mlp.to(self.device)
 
         if self.use_warp:
             self.warp_field = self.warp_field_cls(in_ch=3)# 3 for xyz
@@ -216,6 +223,7 @@ class NerfModel(nn.Module):
             max_deg=self.hyper_point_max_deg,
             use_identity=False, #do not preserve the raw
             alpha=self.alpha_default)
+            
         # todo check this
         self.in_ch_pos = point_feat_ch + hyper_feat_ch
 
@@ -415,7 +423,7 @@ class NerfModel(nn.Module):
             raw = self.nerf_mlps_coarse(points_feat, alpha_condition=alpha_condition, rgb_condition=rgb_condition)
         # raw = self.nerf_mlps[level](
         #     points_feat, alpha_condition, rgb_condition)
-        raw = model_utils.noise_regularize(
+        raw = model_utils.noise_regularize(self.device,
             raw, self.noise_std, self.use_stratified_sampling)
 
         #! this activation is moved inside of the nerf mlp
@@ -566,6 +574,7 @@ class NerfModel(nn.Module):
         # Broadcast embeddings.
         if warp_embed is not None:
             warp_embed = torch.unsqueeze(warp_embed, axis=1)
+            #TODO Jul 02: check in jax the dim of warp_embed
             warp_embed = warp_embed.expand(*batch_shape, warp_embed.shape[-1])
         if hyper_embed is not None:
             hyper_embed = torch.unsqueeze(hyper_embed, axis=1)
@@ -655,7 +664,7 @@ class NerfModel(nn.Module):
         origins = rays_dict['origins']
         directions = rays_dict['directions']
         metadata = rays_dict['metadata']
-        if 'viewdirs' in rays_dict:
+        if 'viewdirs' in rays_dict and rays_dict['viewdirs'] is not None:
             viewdirs = rays_dict['viewdirs']
         else:  # viewdirs are normalized rays_d
             viewdirs = directions

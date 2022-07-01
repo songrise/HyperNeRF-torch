@@ -23,7 +23,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-import model_utils
+from hypernerf import model_utils
 # from hypernerf import types
 
 def get_norm_layer(norm_type:str,channels:int):

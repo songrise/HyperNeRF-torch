@@ -10,9 +10,10 @@ A Non-official pytorch lightning implementation of HyperNeRF.
 - [ ] check the tensor shape with the jax imple
 - [ ] add dataloading and traing code
 - [ ] experiment on the nerfies dataset
-- [ ] switch to pytorch-lightning
+- [x] switch to pytorch-lightning
 - [ ] test the SE3Field 
 - [ ] Clean the code
+- [ ] add noise impl
 
 
 # nerf_pl

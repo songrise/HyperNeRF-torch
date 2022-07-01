@@ -7,8 +7,12 @@ from torch.utils.data import DataLoader
 from datasets import dataset_dict
 
 # models
-from models.nerf import Embedding, NeRF
-from models.rendering import render_rays
+# from models.nerf import Embedding, NeRF
+# from models.rendering import render_rays
+
+# hypernerf
+from hypernerf.models import NerfModel
+from hypernerf.model_utils import prepare_ray_dict, extract_rays_batch
 
 # optimizer, scheduler, visualization
 from utils import *
@@ -31,41 +35,50 @@ class NeRFSystem(LightningModule):
 
         self.loss = loss_dict[hparams.loss_type]()
 
-        self.embedding_xyz = Embedding(3, 10) # 10 is the default number
-        self.embedding_dir = Embedding(3, 4) # 4 is the default number
-        self.embeddings = [self.embedding_xyz, self.embedding_dir]
+        #todo not used
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.embeddings_dict = {'warp': [1,2,3], 'camera':[1,2,3], 'appearance': [1,2,3], 'time': [1,2,3]}
+        self.nerf = NerfModel(self.device,
+                            self.embeddings_dict,
+                            near = .1,
+                            far=10., # todo remove hack for llff
+                            n_samples_coarse=self.hparams.N_samples,
+                            n_samples_fine=self.hparams.N_importance,
+                            )
+        self.nerf = self.nerf.to(self.device) 
+        # self.embedding_xyz = Embedding(3, 10) # 10 is the default number
+        # self.embedding_dir = Embedding(3, 4) # 4 is the default number
+        # self.embeddings = [self.embedding_xyz, self.embedding_dir]
 
-        self.nerf_coarse = NeRF()
-        self.models = [self.nerf_coarse]
-        if hparams.N_importance > 0:
-            self.nerf_fine = NeRF()
-            self.models += [self.nerf_fine]
+        # self.nerf_coarse = NeRF()
+        # self.models = [self.nerf_coarse]
+        # if hparams.N_importance > 0:
+        #     self.nerf_fine = NeRF()
+        #     self.models += [self.nerf_fine]
+        self.models = [self.nerf]
 
     def decode_batch(self, batch):
         rays = batch['rays'] # (B, 8)
         rgbs = batch['rgbs'] # (B, 3)
         return rays, rgbs
+    
 
-    def forward(self, rays):
+    def forward(self, rays_dict):
         """Do batched inference on rays using chunk."""
-        B = rays.shape[0]
+        B = rays_dict["origins"].shape[0]
         results = defaultdict(list)
+        #todo for debugging purposes
+        extra_params = {
+            'nerf_alpha': 0.0,
+            'warp_alpha': 0.0,
+            'hyper_alpha': 0.0,
+            'hyper_sheet_alpha': 0.0,
+        }
         for i in range(0, B, self.hparams.chunk):
-            rendered_ray_chunks = \
-                render_rays(self.models,
-                            self.embeddings,
-                            rays[i:i+self.hparams.chunk],
-                            self.hparams.N_samples,
-                            self.hparams.use_disp,
-                            self.hparams.perturb,
-                            self.hparams.noise_std,
-                            self.hparams.N_importance,
-                            self.hparams.chunk, # chunk size is effective in val mode
-                            self.train_dataset.white_back)
-
+            ray_dict_batch = extract_rays_batch(rays_dict, i, i+self.hparams.chunk)
+            rendered_ray_chunks = self.nerf(ray_dict_batch, extra_params)
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
-
         for k, v in results.items():
             results[k] = torch.cat(v, 0)
         return results
@@ -120,7 +133,8 @@ class NeRFSystem(LightningModule):
         rays, rgbs = self.decode_batch(batch)
         rays = rays.squeeze() # (H*W, 3)
         rgbs = rgbs.squeeze() # (H*W, 3)
-        results = self(rays)
+        rays_dict = prepare_ray_dict(rays)
+        results = self(rays_dict)
         log = {'val_loss': self.loss(results, rgbs)}
         typ = 'fine' if 'rgb_fine' in results else 'coarse'
     

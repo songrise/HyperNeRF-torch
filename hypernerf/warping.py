@@ -19,20 +19,20 @@ from functools import partial
 import torch 
 import torch.nn as nn
 
-# from hypernerf import model_utils
-# from hypernerf import utils
-# from hypernerf import modules
-# from hypernerf import rigid_body as rigid
-# from hypernerf import types
-import model_utils
-import utils
-import modules
-import rigid_body as rigid
-import types
+from hypernerf import model_utils
+from hypernerf import utils
+from hypernerf import modules
+from hypernerf import rigid_body as rigid
+from hypernerf import types
+# import model_utils
+# import utils
+# import modules
+# import rigid_body as rigid
+# import types
 class TranslationField(nn.Module):
     def __init__(self,in_ch,min_deg=0,max_deg=8, use_posenc_identity=True,
-                skips=None,depth=6,hidden_channels=128,activation=None,norm=None,hidden_init=None,
-                output_init=None):
+                skips=None,depth=6,hidden_channels=128,activation=None,
+                norm=None,hidden_init=None,output_init=None):
         super(TranslationField,self).__init__()
         self.in_ch = model_utils.get_posenc_ch(in_ch,min_deg=min_deg,
                                     max_deg=max_deg,
