@@ -1,6 +1,7 @@
 import os, sys
 from opt import get_opts
 import torch
+torch.autograd.set_detect_anomaly(True)
 from collections import defaultdict
 
 from torch.utils.data import DataLoader
@@ -12,7 +13,7 @@ from datasets import dataset_dict
 
 # hypernerf
 from hypernerf.models import NerfModel
-from hypernerf.model_utils import prepare_ray_dict, extract_rays_batch
+from hypernerf.model_utils import prepare_ray_dict, extract_rays_batch, concat_ray_batch
 
 # optimizer, scheduler, visualization
 from utils import *
@@ -75,12 +76,15 @@ class NeRFSystem(LightningModule):
             'hyper_sheet_alpha': 0.0,
         }
         for i in range(0, B, self.hparams.chunk):
+            #for all rays in an image
             ray_dict_batch = extract_rays_batch(rays_dict, i, i+self.hparams.chunk)
             rendered_ray_chunks = self.nerf(ray_dict_batch, extra_params)
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
+        # concatenate chunks
         for k, v in results.items():
-            results[k] = torch.cat(v, 0)
+            results[k] = concat_ray_batch(v)
+
         return results
 
     def prepare_data(self):
@@ -116,12 +120,13 @@ class NeRFSystem(LightningModule):
     def training_step(self, batch, batch_nb):
         log = {'lr': get_learning_rate(self.optimizer)}
         rays, rgbs = self.decode_batch(batch)
-        results = self(rays)
+        rays_dict = prepare_ray_dict(rays)
+        results = self(rays_dict)
         log['train/loss'] = loss = self.loss(results, rgbs)
-        typ = 'fine' if 'rgb_fine' in results else 'coarse'
+        typ = 'fine' if 'fine' in results else 'coarse'
 
         with torch.no_grad():
-            psnr_ = psnr(results[f'rgb_{typ}'], rgbs)
+            psnr_ = psnr(results[typ]['rgb'], rgbs)
             log['train/psnr'] = psnr_
 
         return {'loss': loss,
@@ -136,19 +141,19 @@ class NeRFSystem(LightningModule):
         rays_dict = prepare_ray_dict(rays)
         results = self(rays_dict)
         log = {'val_loss': self.loss(results, rgbs)}
-        typ = 'fine' if 'rgb_fine' in results else 'coarse'
+        typ = 'fine' if 'fine' in results else 'coarse'
     
         if batch_nb == 0:
             W, H = self.hparams.img_wh
-            img = results[f'rgb_{typ}'].view(H, W, 3).cpu()
+            img = results[typ]["rgb"].view(H, W, 3).cpu()
             img = img.permute(2, 0, 1) # (3, H, W)
             img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu() # (3, H, W)
-            depth = visualize_depth(results[f'depth_{typ}'].view(H, W)) # (3, H, W)
+            depth = visualize_depth(results[typ]["depth"].view(H, W)) # (3, H, W)
             stack = torch.stack([img_gt, img, depth]) # (3, 3, H, W)
             self.logger.experiment.add_images('val/GT_pred_depth',
                                                stack, self.global_step)
 
-        log['val_psnr'] = psnr(results[f'rgb_{typ}'], rgbs)
+        log['val_psnr'] = psnr(results[typ]["rgb"], rgbs)
         return log
 
     def validation_epoch_end(self, outputs):

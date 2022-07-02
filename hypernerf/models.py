@@ -400,6 +400,7 @@ class NerfModel(nn.Module):
         alpha_condition, rgb_condition = (
             self.get_condition_inputs(viewdirs, metadata, metadata_encoded))
         #todo calc the input dim
+        #!B,N,60
         points_feat = model_utils.posenc(
             points[..., :3],
             min_deg=self.spatial_point_min_deg,
@@ -415,6 +416,7 @@ class NerfModel(nn.Module):
                 max_deg=self.hyper_point_max_deg,
                 use_identity=False,
                 alpha=extra_params['hyper_alpha'])
+                # !B,N,92
             points_feat = torch.cat([points_feat, hyper_feats], dim=-1)
         # todo check the dtype of level
         if level == 'fine':
@@ -678,6 +680,7 @@ class NerfModel(nn.Module):
 
         # Evaluate coarse samples.
         # todo use native torch code to gather pts.
+        #! [B, N, 3] (32*1024, 32, 3)
         z_vals, points = model_utils.sample_along_rays(
             self.device, origins, directions, self.num_coarse_samples,
             near, far, self.use_stratified_sampling,

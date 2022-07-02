@@ -9,14 +9,14 @@ def get_opts():
     parser.add_argument('--dataset_name', type=str, default='llff',
                         choices=['blender', 'llff'],
                         help='which dataset to train/val')
-    parser.add_argument('--img_wh', nargs="+", type=int, default=[504,378],
+    parser.add_argument('--img_wh', nargs="+", type=int, default=[252,189],
                         help='resolution (img_w, img_h) of the image')
     parser.add_argument('--spheric_poses', default=False, action="store_true",
                         help='whether images are taken in spheric poses (for llff)')
 
-    parser.add_argument('--N_samples', type=int, default=32,
+    parser.add_argument('--N_samples', type=int, default=4,
                         help='number of coarse samples')
-    parser.add_argument('--N_importance', type=int, default=64,
+    parser.add_argument('--N_importance', type=int, default=4,
                         help='number of additional fine samples')
     parser.add_argument('--use_disp', default=False, action="store_true",
                         help='use disparity depth sampling')
@@ -31,7 +31,7 @@ def get_opts():
 
     parser.add_argument('--batch_size', type=int, default=1024,
                         help='batch size')
-    parser.add_argument('--chunk', type=int, default=32*1024,
+    parser.add_argument('--chunk', type=int, default=1024,
                         help='chunk size to split the input to avoid OOM')
     parser.add_argument('--num_epochs', type=int, default=16,
                         help='number of training epochs')

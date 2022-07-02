@@ -1,3 +1,4 @@
+from pandas import concat
 import torch
 # torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn
@@ -360,15 +361,17 @@ def prepare_ray_dict(rays:torch.Tensor)->dict:
     if len(rays.shape) > 2:
         #if in [B, N, 8] format, flatten
         rays = rays.view(-1, 8)
+    B = rays.shape[0]
     dir = rays[:,:3]
     orig = rays[:,3:6]
     near = rays[0,6]
     far = rays[0,7]
     #todo: temporarily forge the metadata
-    metadata= {'warp': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device),
-                        'camera': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device),
-                        'appearance': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device),
-                        'time': torch.Tensor([[0],[0]]).type(torch.long).to(rays.device)}
+
+    metadata= {'warp': torch.ones((B,1),dtype=torch.long,device=rays.device),
+                        'camera':  torch.ones((B,1),dtype=torch.long,device=rays.device),
+                        'appearance':  torch.ones((B,1),dtype=torch.long,device=rays.device),
+                        'time':  torch.ones((B,1),dtype=torch.long,device=rays.device)}
     
     return {"origins": orig,
             "directions": dir,
@@ -390,13 +393,36 @@ def extract_rays_batch(rays:dict,start:int,end:int,drop_last=True)->dict:
     rays_batch = {k:None for k in rays.keys()}
     for key in rays.keys():
         if key == 'metadata':
-            rays_batch[key] = rays[key]
+            metadata_ = {k:None for k in rays[key].keys()}
+            for k,v in rays[key].items():
+                if v is not None:
+                    metadata_[k] = v[start:end]
+            rays_batch[key] = metadata_
         else:
             if rays[key] is not None:
                 rays_batch[key] = rays[key][start:end]
             
     return rays_batch
 
+
+def concat_ray_batch(rays: list) -> dict:
+    """
+    concatenate a list of dictionary
+
+    Args:
+        rays: a list of ray dictionary
+    
+    Returns:
+        a dictionary containing the concatenated rays tensor.
+    """
+    result = {k:None for k in rays[0].keys()}
+    for c in rays:
+        for k,v in c.items():
+            if result[k] is None:
+                result[k] = v
+            else:
+                result[k] = torch.cat([result[k],v],dim=0)
+    return result
 
 
 

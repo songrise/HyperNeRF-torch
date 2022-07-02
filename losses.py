@@ -7,9 +7,9 @@ class MSELoss(nn.Module):
         self.loss = nn.MSELoss(reduction='mean')
 
     def forward(self, inputs, targets):
-        loss = self.loss(inputs['rgb_coarse'], targets)
-        if 'rgb_fine' in inputs:
-            loss += self.loss(inputs['rgb_fine'], targets)
+        loss = self.loss(inputs['coarse']['rgb'], targets)
+        if 'fine' in inputs:
+            loss += self.loss(inputs['fine']['rgb'], targets)
 
         return loss
                
