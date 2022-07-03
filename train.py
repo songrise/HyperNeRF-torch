@@ -37,16 +37,14 @@ class NeRFSystem(LightningModule):
         self.loss = loss_dict[hparams.loss_type]()
 
         #todo not used
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.embeddings_dict = {'warp': [1,2,3], 'camera':[1,2,3], 'appearance': [1,2,3], 'time': [1,2,3]}
-        self.nerf = NerfModel(self.device,
+        self.nerf = NerfModel(
                             self.embeddings_dict,
                             near = .1,
                             far=10., # todo remove hack for llff
                             n_samples_coarse=self.hparams.N_samples,
                             n_samples_fine=self.hparams.N_importance,
                             )
-        self.nerf = self.nerf.to(self.device) 
 
         self.models = [self.nerf]
 
@@ -174,8 +172,9 @@ if __name__ == '__main__':
         debug=False,
         create_git_tag=False
     )
-
-    trainer = Trainer(max_epochs=hparams.num_epochs,
+    from pytorch_lightning.profiler import AdvancedProfiler
+    trainer = Trainer(
+                      max_epochs=hparams.num_epochs,
                       checkpoint_callback=checkpoint_callback,
                       resume_from_checkpoint=hparams.ckpt_path,
                       logger=logger,
@@ -184,8 +183,21 @@ if __name__ == '__main__':
                       progress_bar_refresh_rate=1,
                       gpus=hparams.num_gpus,
                       distributed_backend='ddp' if hparams.num_gpus>1 else None,
-                      num_sanity_val_steps=1,
+                      num_sanity_val_steps=0,
                       benchmark=True,
-                      profiler=hparams.num_gpus==1)
+                      profiler=AdvancedProfiler())
+    # trainer = Trainer(
+    #                   max_epochs=hparams.num_epochs,
+    #                   checkpoint_callback=checkpoint_callback,
+    #                   resume_from_checkpoint=hparams.ckpt_path,
+    #                   logger=logger,
+    #                   early_stop_callback=None,
+    #                   weights_summary=None,
+    #                   progress_bar_refresh_rate=1,
+    #                   gpus=[0,1],
+    #                   distributed_backend='ddp',
+    #                   num_sanity_val_steps=0,
+    #                   benchmark=True,
+    #                   profiler=hparams.num_gpus==1)
 
     trainer.fit(system)

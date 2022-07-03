@@ -326,7 +326,7 @@ class HyperSheetMLP(nn.Module):
 if __name__ == "__main__":
     # test MLP
     device = torch.device('cuda:0')
-    mlp = MLP(in_ch=3,out_ch=3,depth=8,width=256).to(device)
+    mlp = MLP(in_ch=3,out_ch=3,depth=8,width=256)
     x = torch.randn(1,3,3).cuda()
         
 
@@ -334,7 +334,7 @@ if __name__ == "__main__":
     # test NerfMLP
     nerf_mlp = NerfMLP(in_ch=3,out_ch=3,trunk_depth=8, trunk_width=256, 
                 gb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
-                alpha_brach_depth=0,alpha_brach_width=128,alpha_channels=1,skips=None).to(device)
+                alpha_brach_depth=0,alpha_brach_width=128,alpha_channels=1,skips=None)
     x = torch.randn(10,3,3).cuda()
     # (Batch, feature), (1,256)
     alpha_condition = torch.rand(10,256).cuda()
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     # test HyperSheetMLP
 
     hyper_mlp = HyperSheetMLP(in_ch=3,in_ch_embed = 21,out_ch=3,depth=6,width=64)
-    hyper_mlp = hyper_mlp.to(device)
+
     x = torch.randn(1,3,3).cuda()
     embed = torch.randn(1,3,21).cuda()
     print(hyper_mlp(x,embed))

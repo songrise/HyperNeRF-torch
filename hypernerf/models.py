@@ -108,13 +108,12 @@ class NerfModel(nn.Module):
       warp_min_deg: min degree of positional encoding for warps.
       warp_max_deg: max degree of positional encoding for warps.
     """
-    def __init__(self,device,embeddings_dict,
+    def __init__(self,embeddings_dict,
             near:float=0.0, far:float=1.0, 
             n_samples_coarse:int=64, n_samples_fine:int = 128,
             noise_std:float=None):
 
         super(NerfModel,self).__init__()
-        self.device = device
         self.embeddings_dict: Mapping[str, Sequence[int]] = embeddings_dict
         self.near = near
         self.far = far
@@ -198,7 +197,6 @@ class NerfModel(nn.Module):
             if not self.hyper_use_warp_embed:
                 self.hyper_embed = self.hyper_embed_cls(
                     num_embeddings=max(self.embeddings_dict[self.hyper_embed_key]) + 1)
-                self.hyper_embed = self.hyper_embed.to(self.device)
             self.hyper_sheet_mlp = self.hyper_sheet_mlp_cls(out_ch=self.hyper_sheet_out_dim)
 
         if self.use_warp:
@@ -273,15 +271,15 @@ class NerfModel(nn.Module):
 
     @property
     def nerf_embeds(self):
-        return torch.tensor(self.embeddings_dict[self.nerf_embed_key]).to(self.device)
+        return torch.tensor(self.embeddings_dict[self.nerf_embed_key])
 
     @property
     def warp_embeds(self):
-        return torch.tensor(self.embeddings_dict[self.warp_embed_key]).to(self.device)
+        return torch.tensor(self.embeddings_dict[self.warp_embed_key])
 
     @property
     def hyper_embeds(self):
-        return torch.tensor(self.embeddings_dict[self.hyper_embed_key]).to(self.device)
+        return torch.tensor(self.embeddings_dict[self.hyper_embed_key])
 
     @property
     def has_hyper(self):
@@ -424,7 +422,7 @@ class NerfModel(nn.Module):
             raw = self.nerf_mlps_coarse(points_feat, alpha_condition=alpha_condition, rgb_condition=rgb_condition)
         # raw = self.nerf_mlps[level](
         #     points_feat, alpha_condition, rgb_condition)
-        raw = model_utils.noise_regularize(self.device,
+        raw = model_utils.noise_regularize(
             raw, self.noise_std, self.use_stratified_sampling)
 
         #! this activation is moved inside of the nerf mlp
@@ -440,6 +438,7 @@ class NerfModel(nn.Module):
         if self.use_warp and use_warp:
 
             warp_out ={"jacobian":[], "warped_points" :[]}
+            #! implement vmap as iteration
             for i in range(points.shape[0]):
                 # assume always not return jacobian
                 warp_out["warped_points"] = warp_out["warped_points"] + [self.warp_field(points[i],
@@ -596,7 +595,6 @@ class NerfModel(nn.Module):
             out['warp_jacobian'] = warp_jacobian
         out['warped_points'] = warped_points
         out.update(model_utils.volumetric_rendering(
-            self.device,
             rgb,
             sigma,
             z_vals,
@@ -605,7 +603,7 @@ class NerfModel(nn.Module):
             sample_at_infinity=use_sample_at_infinity))
 
         # Add a map containing the returned points at the median depth.
-        depth_indices = model_utils.compute_depth_index(self.device,out['weights'])
+        depth_indices = model_utils.compute_depth_index(out['weights'])
         # med_points = jnp.take_along_axis(
         #     # Unsqueeze axes: sample axis, coords.
         #     warped_points, depth_indices[..., None, None], axis=-2)
@@ -673,8 +671,8 @@ class NerfModel(nn.Module):
         # Evaluate coarse samples.
         # todo use native torch code to gather pts.
         #! [B, N, 3] (32*1024, 32, 3)
-        z_vals, points = model_utils.sample_along_rays(
-            self.device, origins, directions, self.num_coarse_samples,
+        z_vals, points = model_utils.sample_along_rays( origins, 
+            directions, self.num_coarse_samples,
             near, far, self.use_stratified_sampling,
             self.use_linear_disparity)
         coarse_ret = self.render_samples(
@@ -694,8 +692,7 @@ class NerfModel(nn.Module):
         # Evaluate fine samples.
         if self.num_fine_samples > 0:
             z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-            z_vals, points = model_utils.sample_pdf(
-                self.device, z_vals_mid, coarse_ret['weights'][..., 1:-1],
+            z_vals, points = model_utils.sample_pdf(z_vals_mid, coarse_ret['weights'][..., 1:-1],
                 origins, directions, z_vals, self.num_fine_samples,
                 self.use_stratified_sampling)
             out['fine'] = self.render_samples(
@@ -725,7 +722,7 @@ class NerfModel(nn.Module):
         return out
 
 
-def construct_nerf(device, batch_size: int, embeddings_dict: Dict[str, int],
+def construct_nerf(batch_size: int, embeddings_dict: Dict[str, int],
                    near: float, far: float):
     """Neural Randiance Field.
 
@@ -741,7 +738,7 @@ def construct_nerf(device, batch_size: int, embeddings_dict: Dict[str, int],
       model: nn.Model. Nerf model with parameters.
       state: flax.Module.state. Nerf model state for stateful parameters.
     """
-    model = NerfModel(device=device,
+    model = NerfModel(
         embeddings_dict=immutabledict.immutabledict(embeddings_dict),
         near=near,
         far=far,

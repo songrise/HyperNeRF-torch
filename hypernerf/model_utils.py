@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def sample_along_rays(device,origins, directions, num_coarse_samples, near, far,
+def sample_along_rays(origins, directions, num_coarse_samples, near, far,
                       use_stratified_sampling, use_linear_disparity):
     """Stratified sampling along the rays.
 
@@ -23,7 +23,7 @@ def sample_along_rays(device,origins, directions, num_coarse_samples, near, far,
     """
     batch_size = origins.shape[0]
 
-    t_vals = torch.linspace(0., 1., num_coarse_samples,device=device)
+    t_vals = torch.linspace(0., 1., num_coarse_samples,device=origins.device)
     if not use_linear_disparity:
         z_vals = near * (1. - t_vals) + far * t_vals
     else:
@@ -32,7 +32,7 @@ def sample_along_rays(device,origins, directions, num_coarse_samples, near, far,
         mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
         upper = torch.cat([mids, z_vals[..., -1:]],dim= -1)
         lower = torch.cat([z_vals[..., :1], mids], dim=-1)
-        t_rand = torch.rand( [batch_size, num_coarse_samples],device=device)
+        t_rand = torch.rand([batch_size, num_coarse_samples],device=origins.device)
         z_vals = lower + (upper - lower) * t_rand
     else:
         # Broadcast z_vals to make the returned shape consistent.
@@ -41,8 +41,7 @@ def sample_along_rays(device,origins, directions, num_coarse_samples, near, far,
     return (z_vals, (origins[..., None, :] +
                     z_vals[..., :, None] * directions[..., None, :]))
 
-def volumetric_rendering(device,
-                         rgb,
+def volumetric_rendering(rgb,
                          sigma,
                          z_vals,
                          dirs,
@@ -70,7 +69,7 @@ def volumetric_rendering(device,
     # TODO(keunhong): remove this hack.
 
     last_sample_z = 1e10 if sample_at_infinity else 1e-19
-    last_sample_z = torch.tensor(last_sample_z, device=device)
+    last_sample_z = torch.tensor(last_sample_z, device=rgb.device)
 
     dists = torch.cat([
         z_vals[..., 1:] - z_vals[..., :-1],
@@ -81,7 +80,7 @@ def volumetric_rendering(device,
     alpha = 1.0 - torch.exp(-sigma * dists)
     # Prepend a 1.0 to make this an 'exclusive' cumprod as in `tf.math.cumprod`.
     accum_prod = torch.cat([
-        torch.ones_like(alpha[..., :1], device=device),
+        torch.ones_like(alpha[..., :1],device=rgb.device),
         torch.cumprod(1.0 - alpha[..., :-1] + eps, dim=-1),
     ], dim=-1)
     weights = alpha * accum_prod
@@ -89,7 +88,7 @@ def volumetric_rendering(device,
     rgb = (weights[..., None] * rgb).sum(dim=-2)
     #!
     exp_depth = (weights * z_vals).sum(dim=-1)
-    med_depth = compute_depth_map(device, weights, z_vals)
+    med_depth = compute_depth_map( weights, z_vals)
     acc = weights.sum(dim=-1)
     if use_white_background:
         rgb = rgb + (1. - acc[..., None])
@@ -106,7 +105,7 @@ def volumetric_rendering(device,
     }
     return out
 
-def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
+def piecewise_constant_pdf( bins, weights, num_coarse_samples,
                            use_stratified_sampling):
     """Piecewise-Constant PDF sampling.
 
@@ -126,13 +125,13 @@ def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
     weights = weights + eps  # prevent nans
     pdf = weights / weights.sum(dim=-1, keepdims=True)
     cdf = torch.cumsum(pdf, dim=-1)
-    cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1],device=device), cdf], dim=-1)
+    cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1], device = weights.device), cdf], dim=-1)
 
     # Take uniform samples
     if use_stratified_sampling:
-        u = torch.rand(list(cdf.shape[:-1]) + [num_coarse_samples],device=device)
+        u = torch.rand(list(cdf.shape[:-1]) + [num_coarse_samples],device = weights.device)
     else:
-        u = torch.linspace(0., 1., num_coarse_samples,device= device)
+        u = torch.linspace(0., 1., num_coarse_samples, device = weights.device)
         new_shape =  cdf.shape[:-1] + [num_coarse_samples]
         u = u.expand(*new_shape)
     # Invert CDF. This takes advantage of the fact that `bins` is sorted.
@@ -150,7 +149,7 @@ def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
     cdf_g0, cdf_g1 = minmax(cdf)
 
     denom = (cdf_g1 - cdf_g0)
-    one_ =torch.scalar_tensor(1.,device=device)
+    one_ =torch.scalar_tensor(1.,device = weights.device)
     denom = torch.where(denom < eps, one_, denom)
     t = (u - cdf_g0) / denom
     z_samples = bins_g0 + t * (bins_g1 - bins_g0)
@@ -158,7 +157,7 @@ def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
     # Prevent gradient from backprop-ing through samples
     return z_samples.detach()
     
-def sample_pdf(device, bins, weights, origins, directions, z_vals,
+def sample_pdf(bins, weights, origins, directions, z_vals,
                num_coarse_samples, use_stratified_sampling):
     """Hierarchical sampling.
 
@@ -178,7 +177,7 @@ def sample_pdf(device, bins, weights, origins, directions, z_vals,
         points: jnp.ndarray(float32),
         [batch_size, n_coarse_samples + num_fine_samples, 3].
     """
-    z_samples = piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
+    z_samples = piecewise_constant_pdf(bins, weights, num_coarse_samples,
                                         use_stratified_sampling)
     # Compute united z_vals and sample points
     z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], dim=-1), dim=-1)
@@ -186,68 +185,18 @@ def sample_pdf(device, bins, weights, origins, directions, z_vals,
     return z_vals, (
         origins[..., None, :] + z_vals[..., None] * directions[..., None, :])
 
-# Positional encoding (section 5.1), this is the original implementation for NeRF-torch
-class Embedder:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.create_embedding_fn()
-        
-    def create_embedding_fn(self):
-        embed_fns = []
-        d = self.kwargs['input_dims']
-        out_dim = 0
-        if self.kwargs['include_input']:
-            embed_fns.append(lambda x : x)
-            out_dim = out_dim + d
-            
-        max_freq = self.kwargs['max_freq_log2']
-        N_freqs = self.kwargs['num_freqs']
-        
-        if self.kwargs['log_sampling']:
-            freq_bands = 2.**torch.linspace(0., max_freq, steps=N_freqs)
-        else:
-            freq_bands = torch.linspace(2.**0., 2.**max_freq, steps=N_freqs)
-            
-        for freq in freq_bands:
-            for p_fn in self.kwargs['periodic_fns']:
-                embed_fns.append(lambda x, p_fn=p_fn, freq=freq : p_fn(x * freq))
-                out_dim += d
-                    
-        self.embed_fns = embed_fns
-        self.out_dim = out_dim
-        
-    def embed(self, inputs):
-        return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
-
-
-def get_embedder(multires, i=0):
-    if i == -1:
-        return nn.Identity(), 3
-    
-    embed_kwargs = {
-                'include_input' : True,
-                'input_dims' : 3,
-                'max_freq_log2' : multires-1,
-                'num_freqs' : multires,
-                'log_sampling' : True,
-                'periodic_fns' : [torch.sin, torch.cos],
-    }
-    
-    embedder_obj = Embedder(**embed_kwargs)
-    embed = lambda x, eo=embedder_obj : eo.embed(x)
-    return embed, embedder_obj.out_dim
 
 def posenc(x, min_deg, max_deg, use_identity=False, alpha=None):
     """Encode `x` with sinusoids scaled by 2^[min_deg:max_deg-1]."""
     batch_shape = x.shape[:-1]
-    scales = 2.**torch.linspace(min_deg, max_deg, steps=max_deg-min_deg).cuda()
+    scales = 2.**torch.linspace(min_deg, max_deg, steps=max_deg-min_deg,device = x.device)
     # (*, F, C).
     xb = x[..., None, :] * scales[:, None]
     # (*, F, 2, C).
-    four_feat = torch.sin(torch.stack((xb, xb + 0.5*3.1415926),dim = -2)).cuda()
+    four_feat = torch.sin(torch.stack((xb, xb + 0.5*3.1415926),dim = -2))
     
     if alpha is not None:
-        window = posenc_window(min_deg, max_deg, alpha)
+        window = posenc_window(x.device, min_deg, max_deg, alpha)
         four_feat = window[..., None, None] * four_feat
 
     # (*, 2*F*C).
@@ -264,7 +213,7 @@ def get_posenc_ch(in_ch, min_deg, max_deg, use_identity=False, alpha=None):
     enc = posenc(temp, min_deg, max_deg, use_identity, alpha)
     return enc.shape[-1]
 
-def posenc_window(min_deg, max_deg, alpha):
+def posenc_window(device, min_deg, max_deg, alpha):
     """Windows a posenc using a cosiney window.
 
     This is equivalent to taking a truncated Hann window and sliding it to the
@@ -278,11 +227,11 @@ def posenc_window(min_deg, max_deg, alpha):
     Returns:
         A 1-d numpy array with num_sample elements containing the window.
     """
-    bands = torch.linspace(min_deg, max_deg, steps=max_deg-min_deg).cuda()
+    bands = torch.linspace(min_deg, max_deg, steps=max_deg-min_deg,device = device)
     x = torch.clamp(alpha - bands, 0.0, 1.0)
     return 0.5 * (1 + torch.cos(3.1416926 * x + 3.1416926))
 
-def noise_regularize(device, raw, noise_std, use_stratified_sampling):
+def noise_regularize(raw, noise_std, use_stratified_sampling):
     """Regularize the density prediction by adding gaussian noise.
 
     Args:
@@ -295,11 +244,11 @@ def noise_regularize(device, raw, noise_std, use_stratified_sampling):
         raw: jnp.ndarray(float32), [batch_size, num_coarse_samples, 4], updated raw.
     """
     if (noise_std is not None) and noise_std > 0.0 and use_stratified_sampling:
-        noise = torch.rand(raw["alpha"].shape, dtype=raw["alpha"].dtype,device=device) * noise_std
+        noise = torch.rand(raw["alpha"].shape, dtype=raw["alpha"].dtype,device=raw["alpha"].device) * noise_std
         raw["alpha"] = raw["alpha"] + noise
     return raw
 
-def compute_opaqueness_mask(device, weights, depth_threshold=0.5):
+def compute_opaqueness_mask(weights, depth_threshold=0.5):
     """Computes a mask which will be 1.0 at the depth point.
 
     Args:
@@ -313,21 +262,21 @@ def compute_opaqueness_mask(device, weights, depth_threshold=0.5):
         where the 'surface' is.
     """
     cumulative_contribution = torch.cumsum(weights, dim=-1)
-    depth_threshold = torch.tensor(depth_threshold, dtype=weights.dtype, device=device)
+    depth_threshold = torch.tensor(depth_threshold, dtype=weights.dtype,device = weights.device )
     opaqueness = cumulative_contribution >= depth_threshold
-    false_padding = torch.zeros_like(opaqueness[..., :1],device = device)
+    false_padding = torch.zeros_like(opaqueness[..., :1],device = weights.device)
     padded_opaqueness = torch.cat(
         [false_padding, opaqueness[..., :-1]], dim=-1)
     opaqueness_mask = torch.logical_xor(opaqueness, padded_opaqueness)
     opaqueness_mask = opaqueness_mask.type(weights.dtype)
     return opaqueness_mask
 
-def compute_depth_index(device,weights, depth_threshold=0.5):
+def compute_depth_index(weights, depth_threshold=0.5):
     """Compute the sample index of the median depth accumulation."""
-    opaqueness_mask = compute_opaqueness_mask(device, weights, depth_threshold)
+    opaqueness_mask = compute_opaqueness_mask(weights, depth_threshold)
     return torch.argmax(opaqueness_mask, dim=-1)
 
-def compute_depth_map(device, weights, z_vals, depth_threshold=0.5):
+def compute_depth_map(weights, z_vals, depth_threshold=0.5):
     """Compute the depth using the median accumulation.
 
     Note that this differs from the depth computation in NeRF-W's codebase!
@@ -341,7 +290,7 @@ def compute_depth_map(device, weights, z_vals, depth_threshold=0.5):
     Returns:
         A tensor containing the depth of each input pixel.
     """
-    opaqueness_mask = compute_opaqueness_mask(device, weights, depth_threshold)
+    opaqueness_mask = compute_opaqueness_mask(weights, depth_threshold)
     return torch.sum(opaqueness_mask * z_vals, dim=-1)
 
 

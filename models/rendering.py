@@ -130,7 +130,7 @@ def render_rays(models,
                                              dir_embedded[i:i+chunk]], 1)
             else:
                 xyzdir_embedded = xyz_embedded
-            out_chunks = out_chunks + [model(xyzdir_embedded, sigma_only=weights_only)]
+            out_chunks += [model(xyzdir_embedded, sigma_only=weights_only)]
 
         out = torch.cat(out_chunks, 0)
         if weights_only:
