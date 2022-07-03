@@ -68,13 +68,14 @@ def volumetric_rendering(device,
         weights: an array of size (B,S) containing the weight of each sample.
     """
     # TODO(keunhong): remove this hack.
+
     last_sample_z = 1e10 if sample_at_infinity else 1e-19
     last_sample_z = torch.tensor(last_sample_z, device=device)
 
     dists = torch.cat([
         z_vals[..., 1:] - z_vals[..., :-1],
         last_sample_z.expand(z_vals[..., :1].shape)
-    ], -1)
+    ], dim = -1)
 
     dists = dists * torch.norm(dirs[..., None, :], dim=-1)
     alpha = 1.0 - torch.exp(-sigma * dists)
@@ -86,6 +87,7 @@ def volumetric_rendering(device,
     weights = alpha * accum_prod
 
     rgb = (weights[..., None] * rgb).sum(dim=-2)
+    #!
     exp_depth = (weights * z_vals).sum(dim=-1)
     med_depth = compute_depth_map(device, weights, z_vals)
     acc = weights.sum(dim=-1)
@@ -121,10 +123,10 @@ def piecewise_constant_pdf(device, bins, weights, num_coarse_samples,
     eps = 1e-5
 
     # Get pdf
-    weights += eps  # prevent nans
+    weights = weights + eps  # prevent nans
     pdf = weights / weights.sum(dim=-1, keepdims=True)
     cdf = torch.cumsum(pdf, dim=-1)
-    cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1],device=device), cdf], axis=-1)
+    cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1],device=device), cdf], dim=-1)
 
     # Take uniform samples
     if use_stratified_sampling:
@@ -196,7 +198,7 @@ class Embedder:
         out_dim = 0
         if self.kwargs['include_input']:
             embed_fns.append(lambda x : x)
-            out_dim += d
+            out_dim = out_dim + d
             
         max_freq = self.kwargs['max_freq_log2']
         N_freqs = self.kwargs['num_freqs']
@@ -285,7 +287,7 @@ def noise_regularize(device, raw, noise_std, use_stratified_sampling):
 
     Args:
 
-        raw: jnp.ndarray(float32), [batch_size, num_coarse_samples, 4].
+        raw: Dict[torch.Tensor], contains the rgb and density predictions.
         noise_std: float, std dev of noise added to regularize sigma output.
         use_stratified_sampling: add noise only if use_stratified_sampling is True.
 
@@ -293,8 +295,8 @@ def noise_regularize(device, raw, noise_std, use_stratified_sampling):
         raw: jnp.ndarray(float32), [batch_size, num_coarse_samples, 4], updated raw.
     """
     if (noise_std is not None) and noise_std > 0.0 and use_stratified_sampling:
-        noise = torch.rand(raw[..., 3:4].shape, dtype=raw.dtype,device=device) * noise_std
-        raw = torch.cat([raw[..., :3], raw[..., 3:4] + noise], dim=-1)
+        noise = torch.rand(raw["alpha"].shape, dtype=raw["alpha"].dtype,device=device) * noise_std
+        raw["alpha"] = raw["alpha"] + noise
     return raw
 
 def compute_opaqueness_mask(device, weights, depth_threshold=0.5):
@@ -323,7 +325,7 @@ def compute_opaqueness_mask(device, weights, depth_threshold=0.5):
 def compute_depth_index(device,weights, depth_threshold=0.5):
     """Compute the sample index of the median depth accumulation."""
     opaqueness_mask = compute_opaqueness_mask(device, weights, depth_threshold)
-    return torch.argmax(opaqueness_mask, axis=-1)
+    return torch.argmax(opaqueness_mask, dim=-1)
 
 def compute_depth_map(device, weights, z_vals, depth_threshold=0.5):
     """Compute the depth using the median accumulation.

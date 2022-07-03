@@ -7,12 +7,12 @@ A Non-official pytorch lightning implementation of HyperNeRF.
 
 # Todo list
 - [x] unit test hypernerf model
-- [ ] check the tensor shape with the jax imple
-- [ ] add dataloading and traing code
+- [x] check the tensor shape with the jax imple
+- [x] add dataloading and traing code
 - [ ] experiment on the nerfies dataset
 - [x] switch to pytorch-lightning
 - [ ] test the SE3Field 
-- [ ] Clean the code
+- [ ] Clean the code and add docs
 - [ ] add noise impl
 
 

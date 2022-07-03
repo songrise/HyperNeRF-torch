@@ -244,7 +244,7 @@ class LLFFDataset(Dataset):
                     near = self.bounds.min()
                     far = min(8 * near, self.bounds.max()) # focus on central object only
 
-                self.all_rays += [torch.cat([rays_o, rays_d, 
+                self.all_rays = self.all_rays + [torch.cat([rays_o, rays_d, 
                                              near*torch.ones_like(rays_o[:, :1]),
                                              far*torch.ones_like(rays_o[:, :1])],
                                              1)] # (h*w, 8)

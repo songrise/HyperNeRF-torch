@@ -39,53 +39,8 @@ def get_norm_layer(norm_type:str,channels:int):
         return nn.InstanceNorm2d(num_features=channels)
     else:
         raise ValueError('Unknown norm type: {}'.format(norm_type))
-        return None
 
-class Dense(nn.Module):
-    """A dense layer."""
 
-    def __init__(self, in_channels: int, out_channels: int,
-                 activation: Optional[str] = None,
-                 norm: Optional[str] = None,
-                 dropout: Optional[float] = None):
-        """Initializes a dense layer.
-        Args:
-            in_channels: The number of input channels.
-            out_channels: The number of output channels.
-            activation: A string indicating the activation function.
-            norm: A string indicating the type of normalization.
-            dropout: The dropout rate.
-        """
-        super(Dense, self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.activation = activation
-        self.norm = norm
-        self.dropout = dropout
-        self.dropout_layer = None
-        self.norm_layer = None
-        self.activation_layer = None
-        if self.dropout is not None:
-            self.dropout_layer = nn.Dropout(self.dropout)
-        if self.norm is not None:
-            self.norm_layer = get_norm_layer(self.norm)
-        if self.activation is not None:
-            self.activation_layer = model_utils.get_activation_layer(self.activation)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass.
-        Args:
-            x: A tensor of shape (..., in_channels).
-        Returns:
-            A tensor of shape (..., out_channels).
-        """
-        x = torch.reshape(x, (-1, self.in_channels))
-        x = torch.matmul(x, self.weight)
-
-        if self.norm_layer is not None:
-            x = self.norm_layer(x)
-        if self.activation_layer is not None:
-            x = self.activation_layer(x)
 
 
 class MLP(nn.Module):
@@ -104,7 +59,7 @@ class MLP(nn.Module):
         dropout: The dropout rate.
     """
 
-    def __init__(self,in_ch,out_ch, depth=8,width=256,hidden_init=None,hidden_activation=None,
+    def __init__(self,in_ch:int,out_ch:int, depth:int=8,width:int=256,hidden_init=None,hidden_activation=None,
             hidden_norm=None,output_init=None,output_channels=0,output_activation=None,
             use_bias=True,skips=None):
         super(MLP, self).__init__() 
@@ -118,9 +73,9 @@ class MLP(nn.Module):
             self.hidden_init = hidden_init
 
         if hidden_activation == None:
-            self.hidden_activations = nn.ReLU()
+            self.hidden_activation = nn.ReLU()
         else:
-            self.hidden_activations = hidden_activation
+            self.hidden_activation = hidden_activation
 
         self.hidden_norm = hidden_norm
 
@@ -162,7 +117,7 @@ class MLP(nn.Module):
         x = inputs
         for i, linear in enumerate(self.linears):
             x = linear(x)
-            x = self.hidden_activations(x)
+            x = self.hidden_activation(x)
             # if self.hidden_norm is not None:
             #     x = self.norm_layers[i](x)
             if i in self.skips:
@@ -187,13 +142,14 @@ class GLOEmbed(nn.Module):
         self.embedding_dim = embedding_dim
         if embedding_init is None:
             # todo temp not used
-            pass
-            # self.embedding_init = nn.init.kaiming_normal_
+            embedding_init = functools.partial(nn.init.uniform_, b = 0.05)
         self.embedding_init = embedding_init
+
         self.embed = nn.Embedding(
             num_embeddings=self.num_embeddings,
             embedding_dim=self.embedding_dim,
             )
+        self.embedding_init(self.embed.weight)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """Method to get embeddings for specified indices.
@@ -205,7 +161,7 @@ class GLOEmbed(nn.Module):
         The embeddings corresponding to the indices provided.
         """
         if inputs.shape[-1] == 1:
-            inputs = torch.squeeze(inputs, axis=-1)
+            inputs = torch.squeeze(inputs, dim=-1)
 
         return self.embed(inputs)
 
@@ -228,14 +184,13 @@ class NerfMLP(nn.Module):
         conditions the density of the field.
     """
 
-    def __init__(self,in_ch,out_ch=3,trunk_depth=8, trunk_width=256, 
+    def __init__(self,in_ch,trunk_depth=8, trunk_width=256, 
                 rgb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
                 alpha_brach_depth=1,alpha_brach_width=128,alpha_channels=1,
                 skips=None,hidden_activation=None,rgb_activation= None,
                 sigma_activation=None, norm=None):
         super(NerfMLP, self).__init__()
         self.in_ch = in_ch
-        self.out_ch = out_ch#todo remove
         self.trunk_depth = trunk_depth
         self.trunk_width = trunk_width
         self.rgb_branch_depth = rgb_branch_depth
@@ -248,12 +203,15 @@ class NerfMLP(nn.Module):
         if skips is None:
             self.skips = [4,]
         self.skips = skips
+
         if hidden_activation == None:
             self.hidden_activation = nn.ReLU()
         self.hidden_activation = hidden_activation
+
         if rgb_activation == None:
             self.rgb_activation = nn.Identity()
         self.rgb_activation = rgb_activation
+
         if sigma_activation == None:
             self.sigma_activation = nn.Identity()
         self.sigma_activation = sigma_activation
@@ -265,7 +223,6 @@ class NerfMLP(nn.Module):
 
         self.bottleneck_mlp = nn.Linear(self.trunk_width,self.trunk_width//2)#128
 
-        #! Jun 26: x2 for concat the condition
         # todo check in dimension
         # todo assume have rgb conditioning, HARDCODED!
         self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+24,
@@ -276,7 +233,7 @@ class NerfMLP(nn.Module):
                             width=self.rgb_branch_width,
                             skips=self.skips)
         #todo assume no alpha conditioning (256)
-        self.alpha_mlp = MLP(in_ch=self.trunk_width,
+        self.alpha_mlp = MLP(in_ch=self.alpha_branch_width,
                                 out_ch=self.alpha_channels,
                                 depth=self.alpha_branch_depth,
                                 hidden_activation=self.hidden_activation, 
@@ -309,11 +266,13 @@ class NerfMLP(nn.Module):
         """
         x = self.trunk_mlp(x)
         bottleneck = self.bottleneck_mlp(x)
+
         if alpha_condition is not None:
             alpha_condition = self.broadcast_condition(alpha_condition,x.shape[1])
             alpha_input = torch.cat([bottleneck,alpha_condition],dim=-1)
         else:
-            alpha_input = x
+            alpha_input = bottleneck
+
         # todo when assuming no alpha conditioning,
         # the input to alpha_mlp should be the bottleneck,ie 256
         alpha = self.alpha_mlp(alpha_input)
@@ -322,7 +281,7 @@ class NerfMLP(nn.Module):
             rgb_condition = self.broadcast_condition(rgb_condition,x.shape[1])
             rgb_input = torch.cat([bottleneck,rgb_condition],dim=-1)
         else:
-            rgb_input = x
+            rgb_input = bottleneck
         rgb = self.rgb_mlp(rgb_input)
         #todo reshape?
         return {'rgb':rgb,'alpha':alpha}
@@ -330,7 +289,7 @@ class NerfMLP(nn.Module):
 
 
 class HyperSheetMLP(nn.Module):
-    def __init__(self,in_ch=3,in_ch_embed=8,out_ch=3,depth=6,width=64,min_deg=0,max_deg =1,skips=None):
+    def __init__(self,in_ch:int=3,in_ch_embed:int=8,out_ch:int=3,depth:int=6,width:int=64,min_deg:int=0,max_deg:int=1,skips=None,use_residual=False):
         super(HyperSheetMLP, self).__init__()
         self.out_ch = out_ch
         self.depth = depth
@@ -338,6 +297,7 @@ class HyperSheetMLP(nn.Module):
         self.min_deg = min_deg
         self.max_deg = max_deg
         self.in_ch_embed = in_ch_embed # default is 8 according to the paper
+        # assume use identity
         self.in_ch = model_utils.get_posenc_ch(in_ch,self.min_deg,self.max_deg,alpha=None) + in_ch_embed
         if skips is None:
             self.skips = [4,]
@@ -345,16 +305,23 @@ class HyperSheetMLP(nn.Module):
             self.skips = skips
         self.hidden_init = nn.init.xavier_normal_
         self.output_init = functools.partial(nn.init.normal_,std=1e-5)
-        self.mlp = MLP(in_ch=self.in_ch,out_ch=self.out_ch,
-        depth=self.depth,hidden_init = self.hidden_init, 
-        output_init = self.output_init,width=self.width,
-        skips=self.skips)
+        self.use_residual = use_residual
+        self.mlp = MLP(in_ch=self.in_ch,
+                     out_ch=self.out_ch,
+                     depth=self.depth,
+                     hidden_init = self.hidden_init, 
+                     output_init = self.output_init,
+                     width=self.width,
+                     skips=self.skips)
 
 
     def forward(self,pts,embed,alpha = None):
         points_feat = model_utils.posenc(pts,self.min_deg,self.max_deg,alpha=alpha)#todo
         inputs = torch.cat([points_feat,embed],dim=-1)
-        return self.mlp(inputs)
+        if self.use_residual:
+            return self.mlp(inputs) + embed
+        else:
+            return self.mlp(inputs)
 
 if __name__ == "__main__":
     # test MLP

@@ -24,14 +24,28 @@ from hypernerf import utils
 from hypernerf import modules
 from hypernerf import rigid_body as rigid
 from hypernerf import types
-# import model_utils
-# import utils
-# import modules
-# import rigid_body as rigid
-# import types
+
 class TranslationField(nn.Module):
+    """Network that predicts warps as a translation field.
+
+        References:
+            https://en.wikipedia.org/wiki/Vector_potential
+            https://en.wikipedia.org/wiki/Helmholtz_decomposition
+
+        Attributes:
+            metadata_encoder: an encoder for metadata.
+            alpha: the alpha for the positional encoding.
+            skips: the index of the layers with skip connections.
+            depth: the depth of the network excluding the output layer.
+            hidden_channels: the width of the network hidden layers.
+            activation: the activation for each layer.
+            metadata_encoded: whether the metadata parameter is pre-encoded or not.
+            hidden_initializer: the initializer for the hidden layers.
+            output_initializer: the initializer for the last output layer.
+    """
+
     def __init__(self,in_ch,min_deg=0,max_deg=8, use_posenc_identity=True,
-                skips=None,depth=6,hidden_channels=128,activation=None,
+                skips:list=None,depth=6,hidden_channels=128,activation=None,
                 norm=None,hidden_init=None,output_init=None):
         super(TranslationField,self).__init__()
         self.in_ch = model_utils.get_posenc_ch(in_ch,min_deg=min_deg,
@@ -77,7 +91,6 @@ class TranslationField(nn.Module):
                                     use_identity=self.use_posenc_identity,
                                     alpha=extra_params['warp_alpha'])
         # TODO check what is metadata
-        # inputs = torch.cat([points_embed,metadata],dim=-1)
         inputs = points_embed
         translation = self.mlp(inputs)
         warped_points = points + translation

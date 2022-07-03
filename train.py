@@ -47,15 +47,7 @@ class NeRFSystem(LightningModule):
                             n_samples_fine=self.hparams.N_importance,
                             )
         self.nerf = self.nerf.to(self.device) 
-        # self.embedding_xyz = Embedding(3, 10) # 10 is the default number
-        # self.embedding_dir = Embedding(3, 4) # 4 is the default number
-        # self.embeddings = [self.embedding_xyz, self.embedding_dir]
 
-        # self.nerf_coarse = NeRF()
-        # self.models = [self.nerf_coarse]
-        # if hparams.N_importance > 0:
-        #     self.nerf_fine = NeRF()
-        #     self.models += [self.nerf_fine]
         self.models = [self.nerf]
 
     def decode_batch(self, batch):

@@ -33,7 +33,7 @@ class Embedding(nn.Module):
         out = [x]
         for freq in self.freq_bands:
             for func in self.funcs:
-                out += [func(freq*x)]
+                out = out + [func(freq*x)]
 
         return torch.cat(out, -1)
 
