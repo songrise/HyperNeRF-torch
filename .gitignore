@@ -137,3 +137,6 @@ dmypy.json
 
 nohup.*
 data/
+train_orig.py
+
+*.pkl

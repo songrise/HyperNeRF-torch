@@ -3,6 +3,7 @@ import torch
 # torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn
 import torch.nn.functional as F
+from torchsearchsorted import searchsorted
 
 def sample_along_rays(origins, directions, num_coarse_samples, near, far,
                       use_stratified_sampling, use_linear_disparity):
@@ -71,12 +72,13 @@ def volumetric_rendering(rgb,
     last_sample_z = 1e10 if sample_at_infinity else 1e-19
     last_sample_z = torch.tensor(last_sample_z, device=rgb.device)
 
+    #aka delta
     dists = torch.cat([
         z_vals[..., 1:] - z_vals[..., :-1],
         last_sample_z.expand(z_vals[..., :1].shape)
     ], dim = -1)
 
-    dists = dists * torch.norm(dirs[..., None, :], dim=-1)
+    dists = dists * torch.norm(dirs.unsqueeze(1), dim=-1)
     alpha = 1.0 - torch.exp(-sigma * dists)
     # Prepend a 1.0 to make this an 'exclusive' cumprod as in `tf.math.cumprod`.
     accum_prod = torch.cat([
@@ -85,11 +87,11 @@ def volumetric_rendering(rgb,
     ], dim=-1)
     weights = alpha * accum_prod
 
-    rgb = (weights[..., None] * rgb).sum(dim=-2)
-    #!
-    exp_depth = (weights * z_vals).sum(dim=-1)
-    med_depth = compute_depth_map( weights, z_vals)
-    acc = weights.sum(dim=-1)
+    rgb = torch.sum(weights[..., None] * rgb,dim = -2)
+
+    exp_depth = torch.sum(weights * z_vals,dim=-1)
+    med_depth = compute_depth_map(weights, z_vals)
+    acc = torch.sum(weights,dim=-1)
     if use_white_background:
         rgb = rgb + (1. - acc[..., None])
 
@@ -105,7 +107,58 @@ def volumetric_rendering(rgb,
     }
     return out
 
-def piecewise_constant_pdf( bins, weights, num_coarse_samples,
+# def piecewise_constant_pdf(bins, weights, num_coarse_samples,
+#                            use_stratified_sampling):
+#     """Piecewise-Constant PDF sampling.
+
+#     Args:
+
+#         bins: jnp.ndarray(float32), [batch_size, n_bins + 1].
+#         weights: jnp.ndarray(float32), [batch_size, n_bins].
+#         num_coarse_samples: int, the number of samples.
+#         use_stratified_sampling: bool, use use_stratified_sampling samples.
+
+#     Returns:
+#         z_samples: jnp.ndarray(float32), [batch_size, num_coarse_samples].
+#     """
+#     eps = 1e-5
+
+#     # Get pdf
+#     weights = weights + eps  # prevent nans
+#     pdf = weights / weights.sum(dim=-1, keepdims=True)
+#     cdf = torch.cumsum(pdf, dim=-1)
+#     cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1], device = weights.device), cdf], dim=-1)
+
+#     # Take uniform samples
+#     if use_stratified_sampling:
+#         u = torch.rand(list(cdf.shape[:-1]) + [num_coarse_samples],device = weights.device)
+#     else:
+#         u = torch.linspace(0., 1., num_coarse_samples, device = weights.device)
+#         new_shape =  cdf.shape[:-1] + [num_coarse_samples]
+#         u = u.expand(*new_shape)
+#     # Invert CDF. This takes advantage of the fact that `bins` is sorted.
+#     mask = (u[..., None, :] >= cdf[..., :, None])
+
+#     def minmax(x):
+#         #todo check whether keep dim
+#         x0,_ = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), dim=-2)
+#         x1,_ = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), dim=-2)
+#         x0 = torch.minimum(x0, x[..., -2:-1])
+#         x1 = torch.maximum(x1, x[..., 1:2])
+#         return x0, x1
+
+#     bins_g0, bins_g1 = minmax(bins)
+#     cdf_g0, cdf_g1 = minmax(cdf)
+
+#     denom = (cdf_g1 - cdf_g0)
+#     one_ = torch.scalar_tensor(1., device = weights.device)
+#     denom = torch.where(denom < eps, one_, denom)
+#     t = (u - cdf_g0) / denom
+#     z_samples = bins_g0 + t * (bins_g1 - bins_g0)
+
+#     return z_samples
+
+def piecewise_constant_pdf(bins, weights, num_coarse_samples,
                            use_stratified_sampling):
     """Piecewise-Constant PDF sampling.
 
@@ -120,42 +173,36 @@ def piecewise_constant_pdf( bins, weights, num_coarse_samples,
         z_samples: jnp.ndarray(float32), [batch_size, num_coarse_samples].
     """
     eps = 1e-5
+    N_rays, N_samples_ = weights.shape
+    N_importance = num_coarse_samples
+    weights = weights + eps # prevent division by zero (don't do inplace op!)
+    pdf = weights / torch.sum(weights, -1, keepdim=True) # (N_rays, N_samples_)
+    cdf = torch.cumsum(pdf, -1) # (N_rays, N_samples), cumulative distribution function
+    cdf = torch.cat([torch.zeros_like(cdf[: ,:1]), cdf], -1)  # (N_rays, N_samples_+1) 
+                                                               # padded to 0~1 inclusive
 
-    # Get pdf
-    weights = weights + eps  # prevent nans
-    pdf = weights / weights.sum(dim=-1, keepdims=True)
-    cdf = torch.cumsum(pdf, dim=-1)
-    cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1], device = weights.device), cdf], dim=-1)
-
-    # Take uniform samples
-    if use_stratified_sampling:
-        u = torch.rand(list(cdf.shape[:-1]) + [num_coarse_samples],device = weights.device)
+    if not use_stratified_sampling:
+        u = torch.linspace(0, 1, N_importance, device=bins.device)
+        u = u.expand(N_rays, N_importance)
     else:
-        u = torch.linspace(0., 1., num_coarse_samples, device = weights.device)
-        new_shape =  cdf.shape[:-1] + [num_coarse_samples]
-        u = u.expand(*new_shape)
-    # Invert CDF. This takes advantage of the fact that `bins` is sorted.
-    mask = (u[..., None, :] >= cdf[..., :, None])
+        u = torch.rand(N_rays, N_importance, device=bins.device)
+    u = u.contiguous()
 
-    def minmax(x):
-        #todo check whether keep dim
-        x0,_ = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), dim=-2)
-        x1,_ = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), dim=-2)
-        x0 = torch.minimum(x0, x[..., -2:-1])
-        x1 = torch.maximum(x1, x[..., 1:2])
-        return x0, x1
+    inds = searchsorted(cdf, u, side='right')
+    below = torch.clamp_min(inds-1, 0)
+    above = torch.clamp_max(inds, N_samples_)
 
-    bins_g0, bins_g1 = minmax(bins)
-    cdf_g0, cdf_g1 = minmax(cdf)
+    inds_sampled = torch.stack([below, above], -1).view(N_rays, 2*N_importance)
+    cdf_g = torch.gather(cdf, 1, inds_sampled).view(N_rays, N_importance, 2)
+    bins_g = torch.gather(bins, 1, inds_sampled).view(N_rays, N_importance, 2)
 
-    denom = (cdf_g1 - cdf_g0)
-    one_ =torch.scalar_tensor(1.,device = weights.device)
-    denom = torch.where(denom < eps, one_, denom)
-    t = (u - cdf_g0) / denom
-    z_samples = bins_g0 + t * (bins_g1 - bins_g0)
+    denom = cdf_g[...,1]-cdf_g[...,0]
+    denom[denom<eps] = 1 # denom equals 0 means a bin has weight 0, in which case it will not be sampled
+                         # anyway, therefore any value for it is fine (set to 1 here)
 
-    # Prevent gradient from backprop-ing through samples
-    return z_samples.detach()
+    samples = bins_g[...,0] + (u-cdf_g[...,0])/denom * (bins_g[...,1]-bins_g[...,0])
+
+    return samples.detach()
     
 def sample_pdf(bins, weights, origins, directions, z_vals,
                num_coarse_samples, use_stratified_sampling):
@@ -194,10 +241,10 @@ def posenc(x, min_deg, max_deg, use_identity=False, alpha=None):
     xb = x[..., None, :] * scales[:, None]
     # (*, F, 2, C).
     four_feat = torch.sin(torch.stack((xb, xb + 0.5*3.1415926),dim = -2))
-    
-    if alpha is not None:
-        window = posenc_window(x.device, min_deg, max_deg, alpha)
-        four_feat = window[..., None, None] * four_feat
+    #TODO temp disabled for debugging
+    # if alpha is not None:
+    #     window = posenc_window(x.device, min_deg, max_deg, alpha)
+    #     four_feat = window[..., None, None] * four_feat
 
     # (*, 2*F*C).
     four_feat = four_feat.view((*batch_shape, -1))
@@ -244,7 +291,9 @@ def noise_regularize(raw, noise_std, use_stratified_sampling):
         raw: jnp.ndarray(float32), [batch_size, num_coarse_samples, 4], updated raw.
     """
     if (noise_std is not None) and noise_std > 0.0 and use_stratified_sampling:
-        noise = torch.rand(raw["alpha"].shape, dtype=raw["alpha"].dtype,device=raw["alpha"].device) * noise_std
+        # noise = torch.zeros_like(raw['alpha']).normal_(0, noise_std)
+        noise = torch.randn(raw['alpha'].shape,
+                device = raw['alpha'].device,dtype=raw['alpha'].dtype) * noise_std
         raw["alpha"] = raw["alpha"] + noise
     return raw
 
@@ -313,8 +362,8 @@ def prepare_ray_dict(rays:torch.Tensor)->dict:
         #if in [B, N, 8] format, flatten
         rays = rays.view(-1, 8)
     B = rays.shape[0]
-    dir = rays[:,:3]
-    orig = rays[:,3:6]
+    orig = rays[:,:3]
+    dir = rays[:,3:6]
     near = rays[0,6]
     far = rays[0,7]
     #todo: temporarily forge the metadata

@@ -1,7 +1,8 @@
 import os, sys
+
 from opt import get_opts
 import torch
-torch.autograd.set_detect_anomaly(True)
+
 from collections import defaultdict
 
 from torch.utils.data import DataLoader
@@ -29,6 +30,10 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.logging import TestTubeLogger
 
+#debugging
+from pytorch_lightning.profiler import AdvancedProfiler, SimpleProfiler
+torch.autograd.set_detect_anomaly(True)
+
 class NeRFSystem(LightningModule):
     def __init__(self, hparams):
         super(NeRFSystem, self).__init__()
@@ -40,11 +45,14 @@ class NeRFSystem(LightningModule):
         self.embeddings_dict = {'warp': [1,2,3], 'camera':[1,2,3], 'appearance': [1,2,3], 'time': [1,2,3]}
         self.nerf = NerfModel(
                             self.embeddings_dict,
-                            near = .1,
-                            far=10., # todo remove hack for llff
+                            near = 0.0,
+                            far=1.0, # todo use ndc here
                             n_samples_coarse=self.hparams.N_samples,
                             n_samples_fine=self.hparams.N_importance,
+                            noise_std=self.hparams.noise_std,
+                            hyper_slice_method = 'bendy_sheet'
                             )
+                            #when use warp, remember to include the hyper sheet
 
         self.models = [self.nerf]
 
@@ -59,11 +67,12 @@ class NeRFSystem(LightningModule):
         B = rays_dict["origins"].shape[0]
         results = defaultdict(list)
         #todo for debugging purposes
+        # todo check the value
         extra_params = {
-            'nerf_alpha': 0.0,
-            'warp_alpha': 0.0,
-            'hyper_alpha': 0.0,
-            'hyper_sheet_alpha': 0.0,
+            'nerf_alpha': None,
+            'warp_alpha': None,
+            'hyper_alpha': None,
+            'hyper_sheet_alpha': None,
         }
         for i in range(0, B, self.hparams.chunk):
             #for all rays in an image
@@ -138,7 +147,12 @@ class NeRFSystem(LightningModule):
             img = results[typ]["rgb"].view(H, W, 3).cpu()
             img = img.permute(2, 0, 1) # (3, H, W)
             img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu() # (3, H, W)
+            with open('depth.pkl', 'wb') as f:
+                import pickle
+                pickle.dump(results[typ]["depth"].view(H, W), f)
+
             depth = visualize_depth(results[typ]["depth"].view(H, W)) # (3, H, W)
+            #dump depth for debugging                
             stack = torch.stack([img_gt, img, depth]) # (3, 3, H, W)
             self.logger.experiment.add_images('val/GT_pred_depth',
                                                stack, self.global_step)
@@ -172,8 +186,8 @@ if __name__ == '__main__':
         debug=False,
         create_git_tag=False
     )
-    from pytorch_lightning.profiler import AdvancedProfiler
-    trainer = Trainer(
+    profiler = AdvancedProfiler()
+    trainer = Trainer(precision = 32,
                       max_epochs=hparams.num_epochs,
                       checkpoint_callback=checkpoint_callback,
                       resume_from_checkpoint=hparams.ckpt_path,
@@ -183,9 +197,10 @@ if __name__ == '__main__':
                       progress_bar_refresh_rate=1,
                       gpus=hparams.num_gpus,
                       distributed_backend='ddp' if hparams.num_gpus>1 else None,
-                      num_sanity_val_steps=0,
+                      num_sanity_val_steps=1,
                       benchmark=True,
-                      profiler=AdvancedProfiler())
+                      profiler=True,
+                      val_check_interval=0.2)
     # trainer = Trainer(
     #                   max_epochs=hparams.num_epochs,
     #                   checkpoint_callback=checkpoint_callback,

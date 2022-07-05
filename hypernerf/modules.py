@@ -68,7 +68,7 @@ class MLP(nn.Module):
         self.depth = depth
         self.width = width
         if hidden_init is None:
-            self.hidden_init = nn.init.kaiming_normal_
+            self.hidden_init = nn.init.xavier_uniform_
         else:
             self.hidden_init = hidden_init
 
@@ -80,7 +80,7 @@ class MLP(nn.Module):
         self.hidden_norm = hidden_norm
 
         if output_init is None:
-            self.output_init = nn.init.kaiming_normal_
+            self.output_init = nn.init.xavier_uniform_
         else:
             self.output_init = output_init
 
@@ -188,7 +188,7 @@ class NerfMLP(nn.Module):
                 rgb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
                 alpha_brach_depth=1,alpha_brach_width=128,alpha_channels=1,
                 skips=None,hidden_activation=None,rgb_activation= None,
-                sigma_activation=None, norm=None):
+                norm=None):
         super(NerfMLP, self).__init__()
         self.in_ch = in_ch
         self.trunk_depth = trunk_depth
@@ -212,20 +212,24 @@ class NerfMLP(nn.Module):
             self.rgb_activation = nn.Identity()
         self.rgb_activation = rgb_activation
 
-        if sigma_activation == None:
-            self.sigma_activation = nn.Identity()
-        self.sigma_activation = sigma_activation
+        self.sigma_activation = nn.Identity()
+
         self.norm = norm
 
         #todo check this
-        self.trunk_mlp = MLP(in_ch=self.in_ch,out_ch=self.trunk_width,depth=self.trunk_depth,
-            width=self.trunk_width)
+        self.trunk_mlp = MLP(in_ch=self.in_ch,
+                            out_ch=self.trunk_width,
+                            depth=self.trunk_depth,
+                            width=self.trunk_width,
+                            hidden_activation=self.hidden_activation,
+                            skips=self.skips,
+                            output_activation=self.hidden_activation)
 
         self.bottleneck_mlp = nn.Linear(self.trunk_width,self.trunk_width//2)#128
 
         # todo check in dimension
-        # todo assume have rgb conditioning, HARDCODED!
-        self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+24,
+        # todo assume have rgb conditioning (view_dir), HARDCODED!
+        self.rgb_mlp = MLP(in_ch=self.trunk_width+27,
                             out_ch=self.rgb_channels,
                             depth=self.rgb_branch_depth,
                             hidden_activation=self.hidden_activation,
@@ -233,14 +237,16 @@ class NerfMLP(nn.Module):
                             width=self.rgb_branch_width,
                             skips=self.skips)
         #todo assume no alpha conditioning (256)
-        self.alpha_mlp = MLP(in_ch=self.alpha_branch_width,
-                                out_ch=self.alpha_channels,
-                                depth=self.alpha_branch_depth,
-                                hidden_activation=self.hidden_activation, 
-                                output_activation=self.sigma_activation,
-                                width=self.alpha_branch_width,
-                                skips=self.skips,
-                                )
+        # self.alpha_mlp = MLP(in_ch=self.alpha_branch_width,
+        #                         out_ch=self.alpha_channels,
+        #                         depth=self.alpha_branch_depth,
+        #                         hidden_activation=self.hidden_activation, 
+        #                         output_activation=self.sigma_activation,
+        #                         width=self.alpha_branch_width,
+        #                         skips=self.skips,
+        #                         )
+        self.alpha_mlp = nn.Linear(self.trunk_width, self.alpha_channels)
+        nn.init.xavier_uniform_(self.alpha_mlp.weight)
         
     def broadcast_condition(self,c,num_samples):
         # Broadcast condition from [batch, feature] to
@@ -265,13 +271,15 @@ class NerfMLP(nn.Module):
             raw: [batch, num_coarse_samples, rgb_channels+alpha_channels].
         """
         x = self.trunk_mlp(x)
-        bottleneck = self.bottleneck_mlp(x)
+        # bottleneck = self.bottleneck_mlp(x)
+        #TODO debug
+        bottleneck = x
 
         if alpha_condition is not None:
             alpha_condition = self.broadcast_condition(alpha_condition,x.shape[1])
             alpha_input = torch.cat([bottleneck,alpha_condition],dim=-1)
         else:
-            alpha_input = bottleneck
+            alpha_input =bottleneck
 
         # todo when assuming no alpha conditioning,
         # the input to alpha_mlp should be the bottleneck,ie 256
@@ -282,14 +290,16 @@ class NerfMLP(nn.Module):
             rgb_input = torch.cat([bottleneck,rgb_condition],dim=-1)
         else:
             rgb_input = bottleneck
+
         rgb = self.rgb_mlp(rgb_input)
-        #todo reshape?
+
         return {'rgb':rgb,'alpha':alpha}
 
 
 
 class HyperSheetMLP(nn.Module):
-    def __init__(self,in_ch:int=3,in_ch_embed:int=8,out_ch:int=3,depth:int=6,width:int=64,min_deg:int=0,max_deg:int=1,skips=None,use_residual=False):
+    def __init__(self,in_ch:int=3,in_ch_embed:int=8,out_ch:int=3,depth:int=6,
+                    width:int=64,min_deg:int=0,max_deg:int=1,skips=None,use_residual=False):
         super(HyperSheetMLP, self).__init__()
         self.out_ch = out_ch
         self.depth = depth
@@ -303,7 +313,7 @@ class HyperSheetMLP(nn.Module):
             self.skips = [4,]
         else:
             self.skips = skips
-        self.hidden_init = nn.init.xavier_normal_
+        self.hidden_init = nn.init.xavier_uniform_
         self.output_init = functools.partial(nn.init.normal_,std=1e-5)
         self.use_residual = use_residual
         self.mlp = MLP(in_ch=self.in_ch,
@@ -316,7 +326,7 @@ class HyperSheetMLP(nn.Module):
 
 
     def forward(self,pts,embed,alpha = None):
-        points_feat = model_utils.posenc(pts,self.min_deg,self.max_deg,alpha=alpha)#todo
+        points_feat = model_utils.posenc(pts,self.min_deg,self.max_deg,alpha=alpha)
         inputs = torch.cat([points_feat,embed],dim=-1)
         if self.use_residual:
             return self.mlp(inputs) + embed

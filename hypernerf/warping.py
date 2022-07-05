@@ -84,13 +84,12 @@ class TranslationField(nn.Module):
             skips=self.skips,
         )
         
-    def warp(self,points:torch.Tensor,metadata:torch.Tensor,extra_params) -> torch.Tensor:
+    def warp(self,points:torch.Tensor,extra_params) -> torch.Tensor:
         points_embed = model_utils.posenc(points,
                                     min_deg=self.min_deg,
                                     max_deg=self.max_deg,
                                     use_identity=self.use_posenc_identity,
                                     alpha=extra_params['warp_alpha'])
-        # TODO check what is metadata
         inputs = points_embed
         translation = self.mlp(inputs)
         warped_points = points + translation
@@ -99,7 +98,6 @@ class TranslationField(nn.Module):
     
     def forward(self,
                points: torch.Tensor,
-               metadata: torch.Tensor,
                extra_params,
                return_jacobian: bool = False):
         """Warp the given points using a warp field.
@@ -115,8 +113,9 @@ class TranslationField(nn.Module):
         The warped points and the Jacobian of the warp if `return_jacobian` is
             True.
         """
+        #! Jul 03: removed the metadata (warp_embedding)
         out = {
-            'warped_points': self.warp(points, metadata, extra_params)
+            'warped_points': self.warp(points, extra_params)
         }
 
         if return_jacobian:

@@ -9,14 +9,14 @@ def get_opts():
     parser.add_argument('--dataset_name', type=str, default='llff',
                         choices=['blender', 'llff'],
                         help='which dataset to train/val')
-    parser.add_argument('--img_wh', nargs="+", type=int, default=[252,189],
+    parser.add_argument('--img_wh', nargs="+", type=int, default=[504,378],
                         help='resolution (img_w, img_h) of the image')
     parser.add_argument('--spheric_poses', default=False, action="store_true",
                         help='whether images are taken in spheric poses (for llff)')
 
-    parser.add_argument('--N_samples', type=int, default=4,
+    parser.add_argument('--N_samples', type=int, default=64,
                         help='number of coarse samples')
-    parser.add_argument('--N_importance', type=int, default=4,
+    parser.add_argument('--N_importance', type=int, default=128,
                         help='number of additional fine samples')
     parser.add_argument('--use_disp', default=False, action="store_true",
                         help='use disparity depth sampling')
@@ -29,9 +29,9 @@ def get_opts():
                         choices=['mse'],
                         help='loss to use')
 
-    parser.add_argument('--batch_size', type=int, default=4096,
+    parser.add_argument('--batch_size', type=int, default=1024,
                         help='batch size')
-    parser.add_argument('--chunk', type=int, default=32*1024,
+    parser.add_argument('--chunk', type=int, default=1024,
                         help='chunk size to split the input to avoid OOM')
     parser.add_argument('--num_epochs', type=int, default=16,
                         help='number of training epochs')
@@ -74,5 +74,14 @@ def get_opts():
 
     parser.add_argument('--exp_name', type=str, default='exp',
                         help='experiment name')
+
+    ###########################
+    #### params for warp ####
+    parser.add_argument('--use_warp', type=bool, default=True,
+                        help='whether to use warping')
+    parser.add_argument('slice_method', type='str', default='none',
+                            help='method to slice the hyperspace, must be used with warping',
+                            choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
+
 
     return parser.parse_args()
