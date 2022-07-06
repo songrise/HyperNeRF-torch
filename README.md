@@ -13,7 +13,8 @@ A Non-official pytorch lightning implementation of HyperNeRF.
 - [x] switch to pytorch-lightning
 - [ ] test the SE3Field 
 - [ ] Clean the code and add docs
-- [ ] add noise impl
+- [x] add noise impl
+- [ ] add evaluation code.
 
 
 # nerf_pl

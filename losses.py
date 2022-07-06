@@ -9,7 +9,7 @@ class MSELoss(nn.Module):
     def forward(self, inputs, targets):
         loss = self.loss(inputs['coarse']['rgb'], targets)
         if 'fine' in inputs:
-            loss += self.loss(inputs['fine']['rgb'], targets)
+            loss = loss + self.loss(inputs['fine']['rgb'], targets)
 
         return loss
                

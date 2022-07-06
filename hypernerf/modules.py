@@ -229,7 +229,7 @@ class NerfMLP(nn.Module):
 
         # todo check in dimension
         # todo assume have rgb conditioning (view_dir), HARDCODED!
-        self.rgb_mlp = MLP(in_ch=self.trunk_width+27,
+        self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+27,
                             out_ch=self.rgb_channels,
                             depth=self.rgb_branch_depth,
                             hidden_activation=self.hidden_activation,
@@ -245,7 +245,7 @@ class NerfMLP(nn.Module):
         #                         width=self.alpha_branch_width,
         #                         skips=self.skips,
         #                         )
-        self.alpha_mlp = nn.Linear(self.trunk_width, self.alpha_channels)
+        self.alpha_mlp = nn.Linear(self.alpha_branch_width, self.alpha_channels)
         nn.init.xavier_uniform_(self.alpha_mlp.weight)
         
     def broadcast_condition(self,c,num_samples):
@@ -273,13 +273,14 @@ class NerfMLP(nn.Module):
         x = self.trunk_mlp(x)
         # bottleneck = self.bottleneck_mlp(x)
         #TODO debug
-        bottleneck = x
+        bottleneck = self.bottleneck_mlp(x)
+        bottleneck = self.hidden_activation(bottleneck)
 
         if alpha_condition is not None:
             alpha_condition = self.broadcast_condition(alpha_condition,x.shape[1])
             alpha_input = torch.cat([bottleneck,alpha_condition],dim=-1)
         else:
-            alpha_input =bottleneck
+            alpha_input = bottleneck
 
         # todo when assuming no alpha conditioning,
         # the input to alpha_mlp should be the bottleneck,ie 256

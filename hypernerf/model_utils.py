@@ -48,7 +48,7 @@ def volumetric_rendering(rgb,
                          dirs,
                          use_white_background,
                          sample_at_infinity=True,
-                         eps=1e-10):
+                         eps=1e-5):
     """Volumetric Rendering Function.
 
     Args:
@@ -69,7 +69,7 @@ def volumetric_rendering(rgb,
     """
     # TODO(keunhong): remove this hack.
 
-    last_sample_z = 1e10 if sample_at_infinity else 1e-19
+    last_sample_z = 1e7 if sample_at_infinity else 1e-7 # in fp16, min_value is around 1e-8
     last_sample_z = torch.tensor(last_sample_z, device=rgb.device)
 
     #aka delta
@@ -85,6 +85,7 @@ def volumetric_rendering(rgb,
         torch.ones_like(alpha[..., :1],device=rgb.device),
         torch.cumprod(1.0 - alpha[..., :-1] + eps, dim=-1),
     ], dim=-1)
+    
     weights = alpha * accum_prod
 
     rgb = torch.sum(weights[..., None] * rgb,dim = -2)
@@ -231,6 +232,26 @@ def sample_pdf(bins, weights, origins, directions, z_vals,
     #! shape [N,3] []
     return z_vals, (
         origins[..., None, :] + z_vals[..., None] * directions[..., None, :])
+    
+def posenc_orig(x, N_freqs,log_scale = True):
+    """the encoding scheme used in the original NeRF paper"""
+    batch_shape = x.shape[:-1]
+    if log_scale:
+        freq_bands = 2**torch.linspace(0, N_freqs-1, N_freqs,device = x.device)
+    else:
+        freq_bands = torch.linspace(0, N_freqs-1, N_freqs,device = x.device)
+    funcs = [torch.sin, torch.cos]
+    out = [x]
+    for freq in freq_bands:
+            for func in funcs:
+                out = out + [func(freq*x)]
+    return torch.cat(out, -1)
+
+def get_posenc_ch_orig(in_ch, N_freq,log_scale = True):
+    """get the channels of the posenc."""
+    temp = torch.ones(1,1,in_ch).cuda()
+    enc = posenc_orig(temp, N_freq)
+    return enc.shape[-1]
 
 
 def posenc(x, min_deg, max_deg, use_identity=False, alpha=None):

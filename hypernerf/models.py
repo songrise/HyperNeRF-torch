@@ -128,7 +128,7 @@ class NerfModel(nn.Module):
         self.nerf_trunk_width: int = 256
         self.nerf_rgb_branch_depth: int = 1
         self.nerf_rgb_branch_width: int = 128
-        self.nerf_skips: Tuple[int] = (4,)
+        self.nerf_skips = [4,]
 
         # NeRF rendering.
         self.num_coarse_samples = n_samples_coarse
@@ -150,7 +150,7 @@ class NerfModel(nn.Module):
         self.rgb_channels: int = 3
         self.activation = nn.ReLU()
         self.norm_type: Optional[str] = None
-        self.sigma_activation = nn.Sigmoid() #! Jul 04: modified to sigmoid
+        self.sigma_activation = nn.Softplus()
         self.rgb_activation = nn.Sigmoid()
 
         # NeRF metadata configs.
@@ -182,6 +182,12 @@ class NerfModel(nn.Module):
             functools.partial(modules.GLOEmbed, embedding_dim=8))
         self.warp_embed_key: str = 'warp'
 
+        #TODO for embedding debug
+        # Embedding configs.
+        self.use_original_embed: bool = True
+        self.xyz_freq = 10
+        self.dir_freq = 4
+        self.hyper_freq = 4
 
         if (self.use_nerf_embed
             and not (self.use_rgb_condition
@@ -211,28 +217,37 @@ class NerfModel(nn.Module):
         
         self.alpha_default = 0.0
         # calculate the dimension of the input
-        point_feat_ch = model_utils.get_posenc_ch(3, 
-            min_deg=self.spatial_point_min_deg,
-            max_deg=self.spatial_point_max_deg,
-            use_identity=self.use_posenc_identity,
-            alpha=self.alpha_default)
-            
-        viewdir_feat_ch = model_utils.get_posenc_ch(3,
-            min_deg=self.viewdir_min_deg,
-            max_deg=self.viewdir_max_deg,
-            use_identity=self.use_posenc_identity,
-            alpha=self.alpha_default)
 
-        hyper_feat_ch = model_utils.get_posenc_ch(self.hyper_sheet_out_dim,
-            min_deg=self.hyper_point_min_deg,
-            max_deg=self.hyper_point_max_deg,
-            use_identity=False, #do not preserve the raw
-            alpha=self.alpha_default)
-            
+        if not self.use_original_embed:
+            point_feat_ch = model_utils.get_posenc_ch(3, 
+                min_deg=self.spatial_point_min_deg,
+                max_deg=self.spatial_point_max_deg,
+                use_identity=self.use_posenc_identity,
+                alpha=self.alpha_default)
+                
+            viewdir_feat_ch = model_utils.get_posenc_ch(3,
+                min_deg=self.viewdir_min_deg,
+                max_deg=self.viewdir_max_deg,
+                use_identity=self.use_posenc_identity,
+                alpha=self.alpha_default)
 
-        self.in_ch_pos = point_feat_ch
-        if self.use_warp:
-            self.in_ch_pos += hyper_feat_ch
+            hyper_feat_ch = model_utils.get_posenc_ch(self.hyper_sheet_out_dim,
+                min_deg=self.hyper_point_min_deg,
+                max_deg=self.hyper_point_max_deg,
+                use_identity=False, #do not preserve the raw
+                alpha=self.alpha_default)
+                
+
+            self.in_ch_pos = point_feat_ch
+            if self.use_warp:
+                self.in_ch_pos += hyper_feat_ch
+        else:
+            #TODO for embedding debug            
+            self.in_ch_pos = model_utils.get_posenc_ch_orig(3,self.xyz_freq)
+            self.view_ch_pos = model_utils.get_posenc_ch_orig(3,self.dir_freq)
+            self.hyper_feat_ch = model_utils.get_posenc_ch_orig(self.hyper_sheet_out_dim,self.hyper_freq)
+            if self.use_warp:
+                self.in_ch_pos += self.hyper_feat_ch
         
 
         #TODO temp not used and not implemented
@@ -363,14 +378,17 @@ class NerfModel(nn.Module):
         """Create the condition inputs for the NeRF template."""
         alpha_conditions = []
         rgb_conditions = []
-        # todo calc the dimension for the viewdirs input
+
         # Point attribute predictions
         if self.use_viewdirs:
-            viewdirs_feat = model_utils.posenc(
-                viewdirs,
-                min_deg=self.viewdir_min_deg,
-                max_deg=self.viewdir_max_deg,
-                use_identity=self.use_posenc_identity)
+            if self.use_original_embed:
+                viewdirs_feat = model_utils.posenc_orig(viewdirs,self.dir_freq)
+            else:
+                viewdirs_feat = model_utils.posenc(
+                    viewdirs,
+                    min_deg=self.viewdir_min_deg,
+                    max_deg=self.viewdir_max_deg,
+                    use_identity=self.use_posenc_identity)
             rgb_conditions.append(viewdirs_feat)
 
         if self.use_nerf_embed:
@@ -405,21 +423,27 @@ class NerfModel(nn.Module):
         """Queries the NeRF template."""
         alpha_condition, rgb_condition = (
             self.get_condition_inputs(viewdirs, metadata, metadata_encoded))
-        points_feat = model_utils.posenc(
-            points[..., :3],
-            min_deg=self.spatial_point_min_deg,
-            max_deg=self.spatial_point_max_deg,
-            use_identity=self.use_posenc_identity,
-            alpha=extra_params['nerf_alpha'])
+        if self.use_original_embed:
+            points_feat = model_utils.posenc_orig(points[..., :3],self.xyz_freq)
+        else:
+            points_feat = model_utils.posenc(
+                points[..., :3],
+                min_deg=self.spatial_point_min_deg,
+                max_deg=self.spatial_point_max_deg,
+                use_identity=self.use_posenc_identity,
+                alpha=extra_params['nerf_alpha'])
         # Encode hyper-points if present.
         if points.shape[-1] > 3: # when the dimension of points is larger than 3
-            hyper_feats = model_utils.posenc(
-                points[..., 3:],
-                min_deg=self.hyper_point_min_deg,
-                max_deg=self.hyper_point_max_deg,
-                use_identity=False,
-                alpha=extra_params['hyper_alpha'])
-                # !B,N,92
+            if self.use_original_embed:
+                hyper_feats = model_utils.posenc_orig(points[..., 3:],self.hyper_freq)
+            else:
+                hyper_feats = model_utils.posenc(
+                    points[..., 3:],
+                    min_deg=self.hyper_point_min_deg,
+                    max_deg=self.hyper_point_max_deg,
+                    use_identity=False,
+                    alpha=extra_params['hyper_alpha'])
+                    # !B,N,92
             points_feat = torch.cat([points_feat, hyper_feats], dim=-1)
         # todo check the dtype of level
         if level == 'fine':
@@ -712,15 +736,15 @@ class NerfModel(nn.Module):
                 use_sample_at_infinity=use_sample_at_infinity,
                 render_opts=render_opts)
 
-        if not return_weights:
-            del out['coarse']['weights']
-            del out['fine']['weights']
+        # if not return_weights:
+        #     del out['coarse']['weights']
+        #     del out['fine']['weights']
 
-        if not return_points:
-            del out['coarse']['points']
-            del out['coarse']['warped_points']
-            del out['fine']['points']
-            del out['fine']['warped_points']
+        # if not return_points:
+        #     del out['coarse']['points']
+        #     del out['coarse']['warped_points']
+        #     del out['fine']['points']
+        #     del out['fine']['warped_points']
 
         return out
 

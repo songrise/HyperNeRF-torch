@@ -32,7 +32,7 @@ from pytorch_lightning.logging import TestTubeLogger
 
 #debugging
 from pytorch_lightning.profiler import AdvancedProfiler, SimpleProfiler
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 class NeRFSystem(LightningModule):
     def __init__(self, hparams):
@@ -50,7 +50,8 @@ class NeRFSystem(LightningModule):
                             n_samples_coarse=self.hparams.N_samples,
                             n_samples_fine=self.hparams.N_importance,
                             noise_std=self.hparams.noise_std,
-                            hyper_slice_method = 'bendy_sheet'
+                            hyper_slice_method =  self.hparams.slice_method,
+                            use_warp = self.hparams.use_warp,
                             )
                             #when use warp, remember to include the hyper sheet
 
@@ -147,17 +148,13 @@ class NeRFSystem(LightningModule):
             img = results[typ]["rgb"].view(H, W, 3).cpu()
             img = img.permute(2, 0, 1) # (3, H, W)
             img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu() # (3, H, W)
-            with open('depth.pkl', 'wb') as f:
-                import pickle
-                pickle.dump(results[typ]["depth"].view(H, W), f)
 
             depth = visualize_depth(results[typ]["depth"].view(H, W)) # (3, H, W)
-            #dump depth for debugging                
             stack = torch.stack([img_gt, img, depth]) # (3, 3, H, W)
             self.logger.experiment.add_images('val/GT_pred_depth',
                                                stack, self.global_step)
-
-        log['val_psnr'] = psnr(results[typ]["rgb"], rgbs)
+            log['val_psnr'] = psnr(results[typ]["rgb"], rgbs)
+        
         return log
 
     def validation_epoch_end(self, outputs):
@@ -187,6 +184,7 @@ if __name__ == '__main__':
         create_git_tag=False
     )
     profiler = AdvancedProfiler()
+
     trainer = Trainer(precision = 32,
                       max_epochs=hparams.num_epochs,
                       checkpoint_callback=checkpoint_callback,

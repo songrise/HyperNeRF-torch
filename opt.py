@@ -4,13 +4,16 @@ def get_opts():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--root_dir', type=str,
-                        default='/root/autodl-tmp/ClipNeRF_base/nerf-pytorch/data/nerf_llff_data/fern/',
+                        default='/root/autodl-tmp/ClipNeRF_base/nerf-pytorch/data/nerf_llff_data/room/',
                         help='root directory of dataset')
     parser.add_argument('--dataset_name', type=str, default='llff',
                         choices=['blender', 'llff'],
                         help='which dataset to train/val')
+    # parser.add_argument('--img_wh', nargs="+", type=int, default=[252,189],
+    #                     help='resolution (img_w, img_h) of the image')
     parser.add_argument('--img_wh', nargs="+", type=int, default=[504,378],
                         help='resolution (img_w, img_h) of the image')
+
     parser.add_argument('--spheric_poses', default=False, action="store_true",
                         help='whether images are taken in spheric poses (for llff)')
 
@@ -79,7 +82,7 @@ def get_opts():
     #### params for warp ####
     parser.add_argument('--use_warp', type=bool, default=True,
                         help='whether to use warping')
-    parser.add_argument('slice_method', type='str', default='none',
+    parser.add_argument('--slice_method', type=str, default='bendy_sheet',
                             help='method to slice the hyperspace, must be used with warping',
                             choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
 

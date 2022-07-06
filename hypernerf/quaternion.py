@@ -118,7 +118,7 @@ def rotate(q,v):
     q_v = torch.cat([v,torch.zeros_like(v[...,:1])],dim=-1)
     return im(multiply(multiply(q,q_v), conjugate(q)))
 
-def log(q,eps=1e-8):
+def log(q,eps=1e-7):
     """Returns the logarithm of a quaternion.
     Args:
         q: A tensor of shape (...,4)
