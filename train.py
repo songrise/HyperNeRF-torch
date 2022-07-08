@@ -8,13 +8,10 @@ from collections import defaultdict
 from torch.utils.data import DataLoader
 from datasets import dataset_dict
 
-# models
-# from models.nerf import Embedding, NeRF
-# from models.rendering import render_rays
 
 # hypernerf
 from hypernerf.models import NerfModel
-from hypernerf.model_utils import prepare_ray_dict, extract_rays_batch, concat_ray_batch
+from hypernerf.model_utils import append_batch, prepare_ray_dict, extract_rays_batch, concat_ray_batch
 
 # optimizer, scheduler, visualization
 from utils import *
@@ -26,10 +23,11 @@ from losses import loss_dict
 from metrics import *
 
 # pytorch-lightning
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.accelerators import accelerator
 from pytorch_lightning import LightningModule, Trainer
-from pytorch_lightning.logging import TestTubeLogger
-
+from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.plugins import DDPPlugin
 #debugging
 from pytorch_lightning.profiler import AdvancedProfiler, SimpleProfiler
 # torch.autograd.set_detect_anomaly(True)
@@ -37,8 +35,7 @@ from pytorch_lightning.profiler import AdvancedProfiler, SimpleProfiler
 class NeRFSystem(LightningModule):
     def __init__(self, hparams):
         super(NeRFSystem, self).__init__()
-        self.hparams = hparams
-
+        self.save_hyperparameters(hparams)
         self.loss = loss_dict[hparams.loss_type]()
 
         #todo not used
@@ -47,15 +44,27 @@ class NeRFSystem(LightningModule):
                             self.embeddings_dict,
                             near = 0.0,
                             far=1.0, # todo use ndc here
-                            n_samples_coarse=self.hparams.N_samples,
-                            n_samples_fine=self.hparams.N_importance,
-                            noise_std=self.hparams.noise_std,
-                            hyper_slice_method =  self.hparams.slice_method,
-                            use_warp = self.hparams.use_warp,
+                            n_samples_coarse=hparams.N_samples,
+                            n_samples_fine=hparams.N_importance,
+                            noise_std=hparams.noise_std,
+                            hyper_slice_method =  hparams.slice_method,
+                            use_warp = hparams.use_warp,
                             )
                             #when use warp, remember to include the hyper sheet
 
-        self.models = [self.nerf]
+        self.models = {'nerf': self.nerf}
+        load_ckpt(self.nerf, hparams.weight_path, 'nerf')
+
+    def setup(self, stage):
+        dataset = dataset_dict[self.hparams.dataset_name]
+        kwargs = {'root_dir': self.hparams.root_dir,
+                  'img_wh': tuple(self.hparams.img_wh)}
+        if self.hparams.dataset_name == 'llff':
+            kwargs['spheric_poses'] = self.hparams.spheric_poses
+            kwargs['val_num'] = self.hparams.num_gpus
+        self.train_dataset = dataset(split='train', **kwargs)
+        self.val_dataset = dataset(split='val', **kwargs)
+
 
     def decode_batch(self, batch):
         rays = batch['rays'] # (B, 8)
@@ -66,7 +75,7 @@ class NeRFSystem(LightningModule):
     def forward(self, rays_dict):
         """Do batched inference on rays using chunk."""
         B = rays_dict["origins"].shape[0]
-        results = defaultdict(list)
+        results = {"coarse": None, "fine": None}
         #todo for debugging purposes
         # todo check the value
         extra_params = {
@@ -78,12 +87,10 @@ class NeRFSystem(LightningModule):
         for i in range(0, B, self.hparams.chunk):
             #for all rays in an image
             ray_dict_batch = extract_rays_batch(rays_dict, i, i+self.hparams.chunk)
-            rendered_ray_chunks = self.nerf(ray_dict_batch, extra_params)
-            for k, v in rendered_ray_chunks.items():
-                results[k] += [v]
-        # concatenate chunks
-        for k, v in results.items():
-            results[k] = concat_ray_batch(v)
+            results = append_batch(results, self.nerf(ray_dict_batch, extra_params))
+        # # concatenate chunks
+        # for k, v in results.items():
+        #     results[k] = concat_ray_batch(v)
 
         return results
 
@@ -129,10 +136,11 @@ class NeRFSystem(LightningModule):
             psnr_ = psnr(results[typ]['rgb'], rgbs)
             log['train/psnr'] = psnr_
 
-        return {'loss': loss,
-                'progress_bar': {'train_psnr': psnr_},
-                'log': log
-               }
+        self.log('lr', get_learning_rate(self.optimizer))
+        self.log('train/loss', loss)
+        self.log('train/psnr', psnr_, prog_bar=True)
+
+        return loss
 
     def validation_step(self, batch, batch_nb):
         rays, rgbs = self.decode_batch(batch)
@@ -161,44 +169,48 @@ class NeRFSystem(LightningModule):
         mean_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         mean_psnr = torch.stack([x['val_psnr'] for x in outputs]).mean()
 
-        return {'progress_bar': {'val_loss': mean_loss,
-                                 'val_psnr': mean_psnr},
-                'log': {'val/loss': mean_loss,
-                        'val/psnr': mean_psnr}
-               }
+        self.log('val/loss', mean_loss)
+        self.log('val/psnr', mean_psnr, prog_bar=True)
 
 
 if __name__ == '__main__':
     hparams = get_opts()
-    system = NeRFSystem(hparams)
-    checkpoint_callback = ModelCheckpoint(filepath=os.path.join(f'ckpts/{hparams.exp_name}',
-                                                                '{epoch:d}'),
-                                          monitor='val/loss',
-                                          mode='min',
-                                          save_top_k=5,)
 
-    logger = TestTubeLogger(
-        save_dir="logs",
-        name=hparams.exp_name,
-        debug=False,
-        create_git_tag=False
-    )
+    system = NeRFSystem(hparams)
+    ckpt_cb = ModelCheckpoint(dirpath=f'ckpts/{hparams.exp_name}',
+                              filename='{epoch:d}',
+                              monitor='val/psnr',
+                              mode='max',
+                              save_top_k=5)
+
+    pbar = TQDMProgressBar(refresh_rate=1)
+    callbacks = [ckpt_cb, pbar]
+
+    logger = TensorBoardLogger(save_dir="logs",
+                               name=hparams.exp_name,
+                               default_hp_metric=False)
+
     profiler = AdvancedProfiler()
 
-    trainer = Trainer(precision = 32,
+
+    trainer = Trainer(
+                      precision=hparams.precision,
+                      amp_backend='native',
                       max_epochs=hparams.num_epochs,
-                      checkpoint_callback=checkpoint_callback,
+                      callbacks=callbacks,
                       resume_from_checkpoint=hparams.ckpt_path,
                       logger=logger,
-                      early_stop_callback=None,
-                      weights_summary=None,
-                      progress_bar_refresh_rate=1,
-                      gpus=hparams.num_gpus,
-                      distributed_backend='ddp' if hparams.num_gpus>1 else None,
+                      enable_model_summary=True,
+                      accelerator='gpu',
+                      devices=hparams.num_gpus,
                       num_sanity_val_steps=1,
                       benchmark=True,
-                      profiler=True,
-                      val_check_interval=0.2)
+                      profiler="simple" if hparams.num_gpus==1 else None,
+                      strategy = 'ddp_sharded'if hparams.num_gpus>1 else None,
+                    #   strategy=DDPPlugin(find_unused_parameters=False) if hparams.num_gpus>1 else None,
+                      val_check_interval=0.25,
+                      )
+
     # trainer = Trainer(
     #                   max_epochs=hparams.num_epochs,
     #                   checkpoint_callback=checkpoint_callback,

@@ -4,14 +4,14 @@ def get_opts():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--root_dir', type=str,
-                        default='/root/autodl-tmp/ClipNeRF_base/nerf-pytorch/data/nerf_llff_data/room/',
+                        default= "/root/autodl-tmp/ClipNeRF_base/nerf_pl/data/nerf_llff/fangzhou_nature",
                         help='root directory of dataset')
     parser.add_argument('--dataset_name', type=str, default='llff',
                         choices=['blender', 'llff'],
                         help='which dataset to train/val')
     # parser.add_argument('--img_wh', nargs="+", type=int, default=[252,189],
     #                     help='resolution (img_w, img_h) of the image')
-    parser.add_argument('--img_wh', nargs="+", type=int, default=[504,378],
+    parser.add_argument('--img_wh', nargs="+", type=int, default=[270,480],
                         help='resolution (img_w, img_h) of the image')
 
     parser.add_argument('--spheric_poses', default=False, action="store_true",
@@ -32,19 +32,22 @@ def get_opts():
                         choices=['mse'],
                         help='loss to use')
 
-    parser.add_argument('--batch_size', type=int, default=1024,
+    parser.add_argument('--batch_size', type=int, default=2048,
                         help='batch size')
-    parser.add_argument('--chunk', type=int, default=1024,
+    parser.add_argument('--chunk', type=int, default=2048,
                         help='chunk size to split the input to avoid OOM')
-    parser.add_argument('--num_epochs', type=int, default=16,
+    parser.add_argument('--num_epochs', type=int, default=20,
                         help='number of training epochs')
-    parser.add_argument('--num_gpus', type=int, default=1,
+    parser.add_argument('--num_gpus', type=int, default=2,
                         help='number of gpus')
+    parser.add_argument('--precision', type=int, default=16)
 
     parser.add_argument('--ckpt_path', type=str, default=None,
                         help='pretrained checkpoint path to load')
     parser.add_argument('--prefixes_to_ignore', nargs='+', type=str, default=['loss'],
                         help='the prefixes to ignore in the checkpoint state dict')
+    parser.add_argument('--weight_path', type=str, default=None,
+                        help='pretrained model weight to load (do not load optimizers, etc)')
 
     parser.add_argument('--optimizer', type=str, default='adam',
                         help='optimizer type',
@@ -75,7 +78,7 @@ def get_opts():
                         help='exponent for polynomial learning rate decay')
     ###########################
 
-    parser.add_argument('--exp_name', type=str, default='exp',
+    parser.add_argument('--exp_name', type=str, default='new_ver',
                         help='experiment name')
 
     ###########################

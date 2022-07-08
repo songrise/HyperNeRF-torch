@@ -1,9 +1,7 @@
-from pandas import concat
 import torch
 # torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn
 import torch.nn.functional as F
-from torchsearchsorted import searchsorted
 
 def sample_along_rays(origins, directions, num_coarse_samples, near, far,
                       use_stratified_sampling, use_linear_disparity):
@@ -189,7 +187,7 @@ def piecewise_constant_pdf(bins, weights, num_coarse_samples,
         u = torch.rand(N_rays, N_importance, device=bins.device)
     u = u.contiguous()
 
-    inds = searchsorted(cdf, u, side='right')
+    inds = torch.searchsorted(cdf, u, right=True)
     below = torch.clamp_min(inds-1, 0)
     above = torch.clamp_max(inds, N_samples_)
 
@@ -425,6 +423,17 @@ def extract_rays_batch(rays:dict,start:int,end:int,drop_last=True)->dict:
             
     return rays_batch
 
+def append_batch(all_ret,batch)->dict:
+    """append a result batch to all result dict"""
+    for k,v in all_ret.items():
+        if v is None:
+            all_ret[k] = batch[k]
+        else:
+            #append to dict
+            for kk,vv in batch[k].items():
+                if vv is not None:
+                    all_ret[k][kk] = torch.cat([all_ret[k][kk],vv],dim=0)
+    return all_ret
 
 def concat_ray_batch(rays: list) -> dict:
     """
