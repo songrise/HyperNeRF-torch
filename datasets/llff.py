@@ -158,27 +158,34 @@ def create_spheric_poses(radius, n_poses=120):
 
 
 class LLFFDataset(Dataset):
-    def __init__(self, root_dir, split='train', img_wh=(504, 378), spheric_poses=False, val_num=1):
+    def __init__(self, root_dir, split='train', img_wh=(504, 378), spheric_poses=False, val_num=1,include_idx=False):
         """
         spheric_poses: whether the images are taken in a spheric inward-facing manner
                        default: False (forward-facing)
         val_num: number of val images (used for multigpu training, validate same image for all gpus)
+        include_idx: whether to include the image idx for which the rays belong to.
+        TODO:refactor metadata generation logic inside the LLFFDataset class
         """
         self.root_dir = root_dir
         self.split = split
         self.img_wh = img_wh
         self.spheric_poses = spheric_poses
         self.val_num = max(1, val_num) # at least 1
+        self.num_instance = 0
+        self.include_idx = include_idx
         self.define_transforms()
 
         self.read_meta()
         self.white_back = False
+
+
 
     def read_meta(self):
         poses_bounds = np.load(os.path.join(self.root_dir,
                                             'poses_bounds.npy')) # (N_images, 17)
         self.image_paths = sorted(glob.glob(os.path.join(self.root_dir, 'images/*')))
                         # load full resolution image then resize
+        self.num_instance = len(self.image_paths)
         if self.split in ['train', 'val']:
             assert len(poses_bounds) == len(self.image_paths), \
                 'Mismatch between number of images and number of poses! Please rerun COLMAP!'
@@ -220,6 +227,7 @@ class LLFFDataset(Dataset):
             self.all_rays = []
             self.all_rgbs = []
             for i, image_path in enumerate(self.image_paths):
+
                 if i == val_idx: # exclude the val image
                     continue
                 c2w = torch.FloatTensor(self.poses[i])
@@ -244,19 +252,27 @@ class LLFFDataset(Dataset):
                 else:
                     near = self.bounds.min()
                     far = min(8 * near, self.bounds.max()) # focus on central object only
-
-                self.all_rays = self.all_rays + [torch.cat([rays_o, rays_d, 
-                                             near*torch.ones_like(rays_o[:, :1]),
-                                             far*torch.ones_like(rays_o[:, :1])],
-                                             1)] # (h*w, 8)
+                if not self.include_idx:
+                    self.all_rays = self.all_rays + [torch.cat([rays_o, rays_d, 
+                                                near*torch.ones_like(rays_o[:, :1]),
+                                                far*torch.ones_like(rays_o[:, :1])],
+                                                1)] # (h*w, 8)
+                else:
+                    self.all_rays = self.all_rays + [torch.cat([rays_o, rays_d, 
+                            near*torch.ones_like(rays_o[:, :1]),
+                            far*torch.ones_like(rays_o[:, :1])
+                            , i*torch.ones_like(rays_o[:, :1],dtype =torch.long)], 1)] # (h*w, 9)
+                            
                                  
-            self.all_rays = torch.cat(self.all_rays, 0) # ((N_images-1)*h*w, 8)
+            self.all_rays = torch.cat(self.all_rays, 0) # ((N_images-1)*h*w, 8 or 9)
             self.all_rgbs = torch.cat(self.all_rgbs, 0) # ((N_images-1)*h*w, 3)
         
         elif self.split == 'val':
             print('val image is', self.image_paths[val_idx])
             self.c2w_val = self.poses[val_idx]
             self.image_path_val = self.image_paths[val_idx]
+            if self.include_idx:
+                self.val_idx_list = [val_idx]
 
         else: # for testing, create a parametric rendering path
             if self.split.endswith('train'): # test on training set
@@ -273,6 +289,15 @@ class LLFFDataset(Dataset):
 
     def define_transforms(self):
         self.transform = T.ToTensor()
+
+    # def generate_meta(self,i:int)->dict:
+    #     """
+    #     generate the meta data dict for an image, using the index i.
+    #     Assumuing shared meta for all rays in an image
+    #     """
+    #     return {}
+    
+
 
     def __len__(self):
         if self.split == 'train':
@@ -300,12 +325,17 @@ class LLFFDataset(Dataset):
             else:
                 near = self.bounds.min()
                 far = min(8 * near, self.bounds.max())
-
-            rays = torch.cat([rays_o, rays_d, 
-                              near*torch.ones_like(rays_o[:, :1]),
-                              far*torch.ones_like(rays_o[:, :1])],
-                              1) # (h*w, 8)
-
+            if not self.include_idx:
+                rays = torch.cat([rays_o, rays_d, 
+                                near*torch.ones_like(rays_o[:, :1]),
+                                far*torch.ones_like(rays_o[:, :1])],
+                                1) # (h*w, 8)
+            else:
+                val_idx = self.val_idx_list[0] #TODO Assuming one val
+                rays = torch.cat([rays_o, rays_d, 
+                        near*torch.ones_like(rays_o[:, :1]),
+                        far*torch.ones_like(rays_o[:, :1]),
+                        val_idx*torch.ones_like(rays_o[:, :1],dtype =torch.long)], 1) # (h*w, 9)
             sample = {'rays': rays,
                       'c2w': c2w}
 
@@ -317,3 +347,24 @@ class LLFFDataset(Dataset):
                 sample['rgbs'] = img
 
         return sample
+
+
+if __name__ == '__main__':
+    # dataloader = torch.utils.data.DataLoader(
+    #     LLFFDataset(root_dir="/root/autodl-tmp/data/fangzhou_nature",split='train',img_wh=(270,480),include_idx=True))
+    # for i, sample in enumerate(dataloader):
+    #     print(sample['rays'].shape)
+    #     print(sample['rgbs'].shape)
+    #     if i == 1:
+    #         break
+
+    #test val
+    dataset = LLFFDataset(root_dir="/root/autodl-tmp/data/fangzhou_nature",split='val',img_wh=(270,480),include_idx=True,val_num=1)
+    dataloader = torch.utils.data.DataLoader(
+        dataset)
+    print(dataset.num_instance)
+    for i, sample in enumerate(dataloader):
+        print(sample['rays'].shape)
+        print(sample['rgbs'].shape)
+        if i == 1:
+            break

@@ -44,7 +44,8 @@ def get_opts():
                         help='chunk size to split the input to avoid OOM')
 
     parser.add_argument('--ckpt_path', type=str, 
-                            required=True, help='pretrained checkpoint path to load')
+                            default="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed/epoch=8.ckpt",
+                            help='pretrained checkpoint path to load')
 
     parser.add_argument('--save_depth', default=False, action="store_true",
                         help='whether to save depth prediction')
@@ -59,7 +60,16 @@ def get_opts():
     parser.add_argument('--slice_method', type=str, default='bendy_sheet',
                             help='method to slice the hyperspace, must be used with warping',
                             choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
-
+    ###########################
+    #### params for embedding ####
+    parser.add_argument("--meta_GLO",type=int,default=8,
+                            help="the dimension used for GLO embedding of time")
+    parser.add_argument("--xyz_fourier",type=int,default=10,
+                            help="the dimension used for fourier embedding of points xyz")
+    parser.add_argument("--hyper_fourier",type=int,default=6,
+                            help="the dimension used for fourier embedding of points hyper feature")
+    parser.add_argument("--view_fourier",type=int,default=6,
+                        help="the dimension used for fourier embedding of view dir ")
 
     return parser.parse_args()
 
@@ -105,13 +115,25 @@ if __name__ == "__main__":
         kwargs['spheric_poses'] = args.spheric_poses
     dataset = dataset_dict[args.dataset_name](**kwargs)
     #!todo replace to real data
-    embeddings_ = {'warp': [1,2,3], 'camera':[1,2,3], 'appearance': [1,2,3], 'time': [1,2,3]}
-    nerf = NerfModel(embeddings_dict = embeddings_,
-                        use_warp=args.use_warp,
-                        hyper_slice_method=args.slice_method,
-
-                        )
-
+    NUM_IMG = 100 #!hardcoded, the total number of images in the dataset
+    embeddings_dict = {'warp': [_ for _ in range(NUM_IMG)],
+    'camera':[0],
+    'appearance': [_ for _ in range(NUM_IMG)], 
+    'time': [_ for _ in range(NUM_IMG)]}
+    nerf = NerfModel(
+                    embeddings_dict,
+                    near = 0.0,
+                    far=1.0, # todo use ndc here
+                    n_samples_coarse=args.N_samples,
+                    n_samples_fine=args.N_importance,
+                    hyper_slice_method = args.slice_method,
+                    use_warp = args.use_warp,
+                    GLO_dim = args.meta_GLO,
+                    xyz_fourier_dim = args.xyz_fourier,
+                    hyper_fourier_dim = args.hyper_fourier,
+                    view_fourier_dim= args.view_fourier,
+                    )
+                    
     load_ckpt(nerf, args.ckpt_path, model_name='nerf')
     nerf.cuda().eval()
 
@@ -123,7 +145,7 @@ if __name__ == "__main__":
     for i in tqdm(range(len(dataset))):
         sample = dataset[i]
         rays = sample['rays'].cuda()
-        rays_dict = prepare_ray_dict(rays)
+        rays_dict = prepare_ray_dict(rays) # same times
         results = batched_inference(nerf, rays_dict,
                                     args.N_samples, args.N_importance, args.use_disp,
                                     args.chunk,

@@ -188,6 +188,7 @@ class NerfMLP(nn.Module):
                 rgb_branch_depth=1,rgb_branch_width=128,rgb_channels=3,
                 alpha_brach_depth=1,alpha_brach_width=128,alpha_channels=1,
                 skips=None,hidden_activation=None,rgb_activation= None,
+                alpha_condition_dim:int=8,rgb_condition_dim:int=39,
                 norm=None):
         super(NerfMLP, self).__init__()
         self.in_ch = in_ch
@@ -199,6 +200,8 @@ class NerfMLP(nn.Module):
         self.alpha_branch_depth = alpha_brach_depth
         self.alpha_branch_width = alpha_brach_width
         self.alpha_channels = alpha_channels
+        self.alpha_condition_dim = alpha_condition_dim
+        self.rgb_condition_dim = rgb_condition_dim
         self.condition_density = False
         if skips is None:
             self.skips = [4,]
@@ -229,14 +232,13 @@ class NerfMLP(nn.Module):
 
         # todo check in dimension
         # todo assume have rgb conditioning (view_dir), HARDCODED!
-        self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+27,
+        self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+self.rgb_condition_dim,
                             out_ch=self.rgb_channels,
                             depth=self.rgb_branch_depth,
                             hidden_activation=self.hidden_activation,
                             output_activation=self.rgb_activation, 
                             width=self.rgb_branch_width,
                             skips=self.skips)
-        #todo assume no alpha conditioning (256)
         # self.alpha_mlp = MLP(in_ch=self.alpha_branch_width,
         #                         out_ch=self.alpha_channels,
         #                         depth=self.alpha_branch_depth,
@@ -245,7 +247,7 @@ class NerfMLP(nn.Module):
         #                         width=self.alpha_branch_width,
         #                         skips=self.skips,
         #                         )
-        self.alpha_mlp = nn.Linear(self.alpha_branch_width, self.alpha_channels)
+        self.alpha_mlp = nn.Linear(self.alpha_branch_width+self.alpha_condition_dim, self.alpha_channels)
         nn.init.xavier_uniform_(self.alpha_mlp.weight)
         
     def broadcast_condition(self,c,num_samples):
@@ -309,7 +311,8 @@ class HyperSheetMLP(nn.Module):
         self.max_deg = max_deg
         self.in_ch_embed = in_ch_embed # default is 8 according to the paper
         # assume use identity
-        self.in_ch = model_utils.get_posenc_ch(in_ch,self.min_deg,self.max_deg,alpha=None) + in_ch_embed
+        self.n_freq = 7 #TODO hardcoded
+        self.in_ch = model_utils.get_posenc_ch_orig(in_ch,self.n_freq) + in_ch_embed
         if skips is None:
             self.skips = [4,]
         else:
@@ -327,7 +330,7 @@ class HyperSheetMLP(nn.Module):
 
 
     def forward(self,pts,embed,alpha = None):
-        points_feat = model_utils.posenc(pts,self.min_deg,self.max_deg,alpha=alpha)
+        points_feat = model_utils.posenc_orig(pts,self.n_freq)
         inputs = torch.cat([points_feat,embed],dim=-1)
         if self.use_residual:
             return self.mlp(inputs) + embed

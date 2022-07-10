@@ -4,7 +4,7 @@ def get_opts():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--root_dir', type=str,
-                        default= "/root/autodl-tmp/ClipNeRF_base/nerf_pl/data/nerf_llff/fangzhou_nature",
+                        default= "/root/autodl-tmp/data/fangzhou_nature",
                         help='root directory of dataset')
     parser.add_argument('--dataset_name', type=str, default='llff',
                         choices=['blender', 'llff'],
@@ -38,7 +38,7 @@ def get_opts():
                         help='chunk size to split the input to avoid OOM')
     parser.add_argument('--num_epochs', type=int, default=20,
                         help='number of training epochs')
-    parser.add_argument('--num_gpus', type=int, default=2,
+    parser.add_argument('--num_gpus', type=int, default=1,
                         help='number of gpus')
     parser.add_argument('--precision', type=int, default=16)
 
@@ -78,7 +78,7 @@ def get_opts():
                         help='exponent for polynomial learning rate decay')
     ###########################
 
-    parser.add_argument('--exp_name', type=str, default='new_ver',
+    parser.add_argument('--exp_name', type=str, default='embed',
                         help='experiment name')
 
     ###########################
@@ -88,6 +88,17 @@ def get_opts():
     parser.add_argument('--slice_method', type=str, default='bendy_sheet',
                             help='method to slice the hyperspace, must be used with warping',
                             choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
+    parser.add_argument('--use_nerfies_meta',type=bool, default=True,
+                help="whether to use the metadata (embeddings) for each rays")
 
-
+    ###########################
+    #### params for embedding ####
+    parser.add_argument("--meta_GLO",type=int,default=8,
+                            help="the dimension used for GLO embedding of time")
+    parser.add_argument("--xyz_fourier",type=int,default=10,
+                            help="the dimension used for fourier embedding of points xyz")
+    parser.add_argument("--hyper_fourier",type=int,default=6,
+                            help="the dimension used for fourier embedding of points hyper feature")
+    parser.add_argument("--view_fourier",type=int,default=6,
+                        help="the dimension used for fourier embedding of view dir ")
     return parser.parse_args()

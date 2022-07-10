@@ -44,8 +44,8 @@ class TranslationField(nn.Module):
             output_initializer: the initializer for the last output layer.
     """
 
-    def __init__(self,in_ch,min_deg=0,max_deg=8, use_posenc_identity=True,
-                skips:list=None,depth=6,hidden_channels=128,activation=None,
+    def __init__(self,in_ch,min_deg=0,max_deg=8,emded_dim :int= 8, use_posenc_identity=True,
+                skips:list=None, depth=6,hidden_channels=128,activation=None,
                 norm=None,hidden_init=None,output_init=None):
         super(TranslationField,self).__init__()
         self.in_ch = model_utils.get_posenc_ch(in_ch,min_deg=min_deg,
@@ -59,6 +59,7 @@ class TranslationField(nn.Module):
             skips = [4,]
         self.skips = skips
         self.depth = depth
+        self.embed_dim = emded_dim
         self.hidden_channels = hidden_channels
         if activation is None:
             activation = nn.ReLU()
@@ -70,6 +71,8 @@ class TranslationField(nn.Module):
         if output_init is None:
             output_init = functools.partial(nn.init.uniform_,b=1e-4)
         self.output_init = output_init
+        self.n_freq = 10 #! hardcoded
+        self.in_ch = model_utils.get_posenc_ch_orig(in_ch,self.n_freq) + emded_dim
 
         self.out_ch = 3
         self.mlp = modules.MLP(
@@ -84,13 +87,9 @@ class TranslationField(nn.Module):
             skips=self.skips,
         )
         
-    def warp(self,points:torch.Tensor,extra_params) -> torch.Tensor:
-        points_embed = model_utils.posenc(points,
-                                    min_deg=self.min_deg,
-                                    max_deg=self.max_deg,
-                                    use_identity=self.use_posenc_identity,
-                                    alpha=extra_params['warp_alpha'])
-        inputs = points_embed
+    def warp(self,points:torch.Tensor,metadata:torch.Tensor, extra_params) -> torch.Tensor:
+        points_embed = model_utils.posenc_orig(points,self.n_freq)
+        inputs = torch.concat([points_embed,metadata],dim=-1)
         translation = self.mlp(inputs)
         warped_points = points + translation
 
@@ -98,6 +97,7 @@ class TranslationField(nn.Module):
     
     def forward(self,
                points: torch.Tensor,
+               metadata: torch.Tensor,
                extra_params,
                return_jacobian: bool = False):
         """Warp the given points using a warp field.
@@ -115,7 +115,7 @@ class TranslationField(nn.Module):
         """
         #! Jul 03: removed the metadata (warp_embedding)
         out = {
-            'warped_points': self.warp(points, extra_params)
+            'warped_points': self.warp(points,metadata, extra_params)
         }
 
         if return_jacobian:

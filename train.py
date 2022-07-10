@@ -39,26 +39,42 @@ class NeRFSystem(LightningModule):
         self.loss = loss_dict[hparams.loss_type]()
 
         #todo not used
-        self.embeddings_dict = {'warp': [1,2,3], 'camera':[1,2,3], 'appearance': [1,2,3], 'time': [1,2,3]}
+        NUM_IMG = 100 #!hardcoded, the total number of images in the dataset
+        self.embeddings_dict = {'warp': [_ for _ in range(NUM_IMG)],
+        'camera':[0],
+        'appearance': [_ for _ in range(NUM_IMG)], 
+        'time': [_ for _ in range(NUM_IMG)]}
+        
         self.nerf = NerfModel(
                             self.embeddings_dict,
                             near = 0.0,
-                            far=1.0, # todo use ndc here
+                            far=1.0, # todo assume ndc here
                             n_samples_coarse=hparams.N_samples,
                             n_samples_fine=hparams.N_importance,
                             noise_std=hparams.noise_std,
-                            hyper_slice_method =  hparams.slice_method,
+                            hyper_slice_method = hparams.slice_method,
                             use_warp = hparams.use_warp,
+                            use_nerf_embed= True,
+                            GLO_dim = hparams.meta_GLO,
+                            xyz_fourier_dim = hparams.xyz_fourier,
+                            hyper_fourier_dim = hparams.hyper_fourier,
+                            view_fourier_dim= hparams.view_fourier,
                             )
                             #when use warp, remember to include the hyper sheet
 
         self.models = {'nerf': self.nerf}
         load_ckpt(self.nerf, hparams.weight_path, 'nerf')
+        #log hparam
 
     def setup(self, stage):
         dataset = dataset_dict[self.hparams.dataset_name]
+        # if self.hparams.use_nerfies_meta:
+        #     # num_img = dataset.num_instance # total number of images in the dataset
+        #     # self.num_img = num_img
+
         kwargs = {'root_dir': self.hparams.root_dir,
-                  'img_wh': tuple(self.hparams.img_wh)}
+                  'img_wh': tuple(self.hparams.img_wh),
+                  'include_idx': self.hparams.use_nerfies_meta}
         if self.hparams.dataset_name == 'llff':
             kwargs['spheric_poses'] = self.hparams.spheric_poses
             kwargs['val_num'] = self.hparams.num_gpus
@@ -67,7 +83,7 @@ class NeRFSystem(LightningModule):
 
 
     def decode_batch(self, batch):
-        rays = batch['rays'] # (B, 8)
+        rays = batch['rays'] # (B, 8) or (B, 9) if use meta embedding.
         rgbs = batch['rgbs'] # (B, 3)
         return rays, rgbs
     
@@ -88,16 +104,15 @@ class NeRFSystem(LightningModule):
             #for all rays in an image
             ray_dict_batch = extract_rays_batch(rays_dict, i, i+self.hparams.chunk)
             results = append_batch(results, self.nerf(ray_dict_batch, extra_params))
-        # # concatenate chunks
-        # for k, v in results.items():
-        #     results[k] = concat_ray_batch(v)
+
 
         return results
 
     def prepare_data(self):
         dataset = dataset_dict[self.hparams.dataset_name]
         kwargs = {'root_dir': self.hparams.root_dir,
-                  'img_wh': tuple(self.hparams.img_wh)}
+                  'img_wh': tuple(self.hparams.img_wh),
+                  'include_idx': self.hparams.use_nerfies_meta}
         if self.hparams.dataset_name == 'llff':
             kwargs['spheric_poses'] = self.hparams.spheric_poses
             kwargs['val_num'] = self.hparams.num_gpus
@@ -113,14 +128,14 @@ class NeRFSystem(LightningModule):
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
                           shuffle=True,
-                          num_workers=4,
+                          num_workers=3*self.hparams.num_gpus,
                           batch_size=self.hparams.batch_size,
                           pin_memory=True)
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset,
                           shuffle=False,
-                          num_workers=4,
+                          num_workers=4*self.hparams.num_gpus,
                           batch_size=1, # validate one image (H*W rays) at a time
                           pin_memory=True)
     
@@ -200,7 +215,7 @@ if __name__ == '__main__':
                       callbacks=callbacks,
                       resume_from_checkpoint=hparams.ckpt_path,
                       logger=logger,
-                      enable_model_summary=True,
+                      enable_model_summary=False,
                       accelerator='gpu',
                       devices=hparams.num_gpus,
                       num_sanity_val_steps=1,
@@ -210,19 +225,5 @@ if __name__ == '__main__':
                     #   strategy=DDPPlugin(find_unused_parameters=False) if hparams.num_gpus>1 else None,
                       val_check_interval=0.25,
                       )
-
-    # trainer = Trainer(
-    #                   max_epochs=hparams.num_epochs,
-    #                   checkpoint_callback=checkpoint_callback,
-    #                   resume_from_checkpoint=hparams.ckpt_path,
-    #                   logger=logger,
-    #                   early_stop_callback=None,
-    #                   weights_summary=None,
-    #                   progress_bar_refresh_rate=1,
-    #                   gpus=[0,1],
-    #                   distributed_backend='ddp',
-    #                   num_sanity_val_steps=0,
-    #                   benchmark=True,
-    #                   profiler=hparams.num_gpus==1)
 
     trainer.fit(system)

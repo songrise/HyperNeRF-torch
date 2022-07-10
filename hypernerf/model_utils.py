@@ -377,6 +377,9 @@ def prepare_ray_dict(rays:torch.Tensor)->dict:
                     'metadata': a dictionary of metadata indices e.g., for warping.
     """
     #TODO currently asuming the rays are of the same near, far.
+    #if the last dim is 9, then the indices are included
+    use_meta = rays.shape[-1] == 9
+
     if len(rays.shape) > 2:
         #if in [B, N, 8] format, flatten
         rays = rays.view(-1, 8)
@@ -385,12 +388,15 @@ def prepare_ray_dict(rays:torch.Tensor)->dict:
     dir = rays[:,3:6]
     near = rays[0,6]
     far = rays[0,7]
+    idx = torch.ones((B,1),dtype=torch.long,device=rays.device) #dummy index
+    if use_meta:
+        idx = rays[:,8].type(torch.long)
     #todo: temporarily forge the metadata
 
-    metadata= {'warp': torch.ones((B,1),dtype=torch.long,device=rays.device),
-                        'camera':  torch.ones((B,1),dtype=torch.long,device=rays.device),
-                        'appearance':  torch.ones((B,1),dtype=torch.long,device=rays.device),
-                        'time':  torch.ones((B,1),dtype=torch.long,device=rays.device)}
+    metadata= {'warp': idx.clone(),
+                        'camera':  idx.clone(),
+                        'appearance':  idx.clone(),
+                        'time': idx.clone()}
     
     return {"origins": orig,
             "directions": dir,
