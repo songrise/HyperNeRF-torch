@@ -3,6 +3,7 @@ import argparse
 def get_opts():
     parser = argparse.ArgumentParser()
 
+
     parser.add_argument('--root_dir', type=str,
                         default= "/root/autodl-tmp/data/fangzhou_nature",
                         help='root directory of dataset')
@@ -84,17 +85,28 @@ def get_opts():
     ###########################
     #### params for warp ####
     parser.add_argument('--use_warp', type=bool, default=True,
-                        help='whether to use warping')
+                        help='whether to use warping, when set true, the warp embedding is also used')
     parser.add_argument('--slice_method', type=str, default='bendy_sheet',
                             help='method to slice the hyperspace, must be used with warping',
                             choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
+    parser.add_argument('--hyper_slice_out_dim', type=int, default=4,
+                            help='The output dimension of the hypersheet mlp')
     parser.add_argument('--use_nerfies_meta',type=bool, default=True,
                 help="whether to use the metadata (embeddings) for each rays")
 
     ###########################
     #### params for embedding ####
-    parser.add_argument("--meta_GLO",type=int,default=8,
+    parser.add_argument("--meta_GLO_dim",type=int,default=8,
                             help="the dimension used for GLO embedding of time")
+    parser.add_argument("--share_GLO",type=bool,default=True,
+                            help="When set true, all GLO embedding use the same model and key")
+    parser.add_argument("--use_nerf_embedding",action="store_true",
+                            help="whether to use the nerf embedding")
+    parser.add_argument("--use_alpha_condition",action="store_true",
+                            help="whether to use the alpha condition, must be used with use_nerf_embedding")
+    parser.add_argument("--use_rgb_condition",action="store_true",
+                            help="whether to use the rgb condition, must be used with use_nerf_embedding")                     
+
     parser.add_argument("--xyz_fourier",type=int,default=10,
                             help="the dimension used for fourier embedding of points xyz")
     parser.add_argument("--hyper_fourier",type=int,default=6,

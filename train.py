@@ -53,12 +53,17 @@ class NeRFSystem(LightningModule):
                             n_samples_fine=hparams.N_importance,
                             noise_std=hparams.noise_std,
                             hyper_slice_method = hparams.slice_method,
+                            hyper_slice_out_dim = hparams.hyper_slice_out_dim,
                             use_warp = hparams.use_warp,
-                            use_nerf_embed= True,
-                            GLO_dim = hparams.meta_GLO,
+                            use_nerf_embed= hparams.use_nerf_embedding,
+                            use_alpha_cond= hparams.use_alpha_condition,
+                            use_rgb_cond= hparams.use_rgb_condition,
+                            GLO_dim = hparams.meta_GLO_dim,
+                            share_GLO = hparams.share_GLO,
                             xyz_fourier_dim = hparams.xyz_fourier,
                             hyper_fourier_dim = hparams.hyper_fourier,
                             view_fourier_dim= hparams.view_fourier,
+
                             )
                             #when use warp, remember to include the hyper sheet
 

@@ -128,7 +128,7 @@ if __name__ == "__main__":
                     n_samples_fine=args.N_importance,
                     hyper_slice_method = args.slice_method,
                     use_warp = args.use_warp,
-                    GLO_dim = args.meta_GLO,
+                    GLO_dim = args.meta_GLO_dim,
                     xyz_fourier_dim = args.xyz_fourier,
                     hyper_fourier_dim = args.hyper_fourier,
                     view_fourier_dim= args.view_fourier,

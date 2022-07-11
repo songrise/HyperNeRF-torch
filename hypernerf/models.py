@@ -113,13 +113,18 @@ class NerfModel(nn.Module):
             n_samples_coarse:int=64,
             n_samples_fine:int = 128,
             noise_std:float=None,
-            use_warp:bool = True, # when true, also use warp embedding
+            use_warp:bool = True, # when true, also use suppose use warp embedding
             use_nerf_embed:bool = True,
+            use_alpha_cond:bool = True,
+            use_rgb_cond:bool = False,
             hyper_slice_method:str = None,
+            hyper_slice_out_dim:int = 4,
             GLO_dim:int = 8,
+            share_GLO:bool =True, #when true, all GLO embedding are the same model
             xyz_fourier_dim:int = 10,
             hyper_fourier_dim:int = 6,
-            view_fourier_dim:int = 4,):
+            view_fourier_dim:int = 4,
+            ):
 
         super(NerfModel,self).__init__()
         self.embeddings_dict: Mapping[str, Sequence[int]] = embeddings_dict
@@ -131,7 +136,7 @@ class NerfModel(nn.Module):
         self.noise_std = noise_std
         self.nerf_trunk_depth: int = 8
         self.nerf_trunk_width: int = 256
-        self.nerf_rgb_branch_depth: int = 1
+        self.nerf_rgb_branch_depth: int = 4 #! different from the paper
         self.nerf_rgb_branch_width: int = 128
         self.nerf_skips = [4,]
 
@@ -159,28 +164,32 @@ class NerfModel(nn.Module):
         self.rgb_activation = nn.Sigmoid()
 
         # NeRF metadata configs.
+        if share_GLO:
+            nerf_use_warp_embed = hyper_use_warp_embed = use_warp
+
         self.use_nerf_embed: bool = use_nerf_embed 
-        self.warp_embed_dim = GLO_dim
         self.nerf_embed_cls: Callable[..., nn.Module] = (
             functools.partial(modules.GLOEmbed, embedding_dim=GLO_dim))
         self.nerf_embed_key: str = 'warp'
-        self.use_alpha_condition: bool = True #todo extract as parameter
-        self.use_rgb_condition: bool = False
+        self.nerf_use_warp_embed: bool = nerf_use_warp_embed
+        self.use_alpha_condition: bool = use_alpha_cond 
+        self.use_rgb_condition: bool = use_rgb_cond
         if hyper_slice_method is None:
             self.hyper_slice_method = 'none'
         else:
             self.hyper_slice_method = hyper_slice_method
 
+        #Hyper embedding configs
         self.hyper_embed_cls: Callable[..., nn.Module] = (
             functools.partial(modules.GLOEmbed, embedding_dim=GLO_dim))
         self.hyper_embed_key: str = 'time'
-        self.hyper_use_warp_embed: bool = True #! share the embedding mlp for both warp and slice
+        self.hyper_use_warp_embed: bool = hyper_use_warp_embed
         #! Jun 25: the mlp to slice
         self.hyper_sheet_mlp_cls: Callable[..., nn.Module] = modules.HyperSheetMLP
         self.hyper_sheet_use_input_points: bool = True
-        self.hyper_sheet_out_dim: int = 4 # the output dimension of the hypernet
+        self.hyper_sheet_out_dim: int = hyper_slice_out_dim # the output dimension of the hypernet
 
-        # Warp configs.
+        # Warp embedding configs.
         self.use_warp: bool = use_warp
          #! SE3 untested
         self.warp_field_cls: Callable[..., nn.Module] = warping.TranslationField
@@ -188,9 +197,11 @@ class NerfModel(nn.Module):
             functools.partial(modules.GLOEmbed, embedding_dim=GLO_dim))
         self.warp_embed_key: str = 'time'
 
-        #TODO for embedding debug
+        #TODO for embedding debug & experiment
         # Embedding configs.
-        self.use_original_embed: bool = True
+
+
+        self.use_original_embed: bool = True #!use the plain fourier embedding in NeRF
         self.xyz_freq = xyz_fourier_dim
         self.dir_freq = view_fourier_dim
         self.hyper_freq = hyper_fourier_dim
@@ -252,11 +263,13 @@ class NerfModel(nn.Module):
         else:
             #TODO for embedding debug            
             self.nerf_in_ch_pos = model_utils.get_posenc_ch_orig(3,self.xyz_freq)
-            self.nerf_in_ch_view = model_utils.get_posenc_ch_orig(3,self.dir_freq)
+            self.nerf_cond_ch_rgb = model_utils.get_posenc_ch_orig(3,self.dir_freq)
             # embedding dimension for hyper points.
             self.hyper_feat_ch = model_utils.get_posenc_ch_orig(self.hyper_sheet_out_dim,self.hyper_freq)
             if self.use_warp:
                 self.nerf_in_ch_pos += self.hyper_feat_ch # ! the input channel for the template NeRF
+            if self.use_rgb_condition:
+                self.nerf_cond_ch_rgb += GLO_dim
         
 
         #TODO temp not used and not implemented
@@ -274,7 +287,7 @@ class NerfModel(nn.Module):
                 rgb_channels=self.rgb_channels,
                 rgb_activation = self.rgb_activation,
                 alpha_condition_dim=GLO_dim if self.use_nerf_embed else 0,
-                rgb_condition_dim=self.nerf_in_ch_view)
+                rgb_condition_dim=self.nerf_cond_ch_rgb)
 
         if self.num_fine_samples > 0:
             nerf_mlps_fine = modules.NerfMLP(
@@ -290,7 +303,7 @@ class NerfModel(nn.Module):
                 rgb_channels=self.rgb_channels,
                 rgb_activation = self.rgb_activation,
                 alpha_condition_dim=GLO_dim if self.use_nerf_embed else 0,
-                rgb_condition_dim=self.nerf_in_ch_view)
+                rgb_condition_dim=self.nerf_cond_ch_rgb)
                 
         self.nerf_mlps_coarse = nerf_mlps_coarse
         self.nerf_mlps_fine = nerf_mlps_fine
@@ -409,8 +422,12 @@ class NerfModel(nn.Module):
             if metadata_encoded:
                 nerf_embed = metadata['encoded_nerf']
             else:
-                nerf_embed = metadata[self.nerf_embed_key]
-                nerf_embed = self.nerf_embed(nerf_embed)
+                if self.hyper_use_warp_embed:
+                    nerf_embed = metadata[self.warp_embed_key]
+                    nerf_embed = self.warp_embed(nerf_embed)
+                else:
+                    nerf_embed = metadata[self.nerf_embed_key]
+                    nerf_embed = self.nerf_embed(nerf_embed)
             if self.use_alpha_condition:
                 alpha_conditions.append(nerf_embed)
             if self.use_rgb_condition:

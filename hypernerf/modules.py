@@ -141,8 +141,9 @@ class GLOEmbed(nn.Module):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if embedding_init is None:
-            # todo temp not used
-            embedding_init = functools.partial(nn.init.uniform_, b = 0.05)
+            # embedding_init = functools.partial(nn.init.uniform_, b = 0.05)
+            #TODO for debugging
+            embedding_init = functools.partial(nn.init.normal_, std = 0.1/embedding_dim)
         self.embedding_init = embedding_init
 
         self.embed = nn.Embedding(
@@ -230,8 +231,7 @@ class NerfMLP(nn.Module):
 
         self.bottleneck_mlp = nn.Linear(self.trunk_width,self.trunk_width//2)#128
 
-        # todo check in dimension
-        # todo assume have rgb conditioning (view_dir), HARDCODED!
+
         self.rgb_mlp = MLP(in_ch=self.rgb_branch_width+self.rgb_condition_dim,
                             out_ch=self.rgb_channels,
                             depth=self.rgb_branch_depth,
@@ -247,6 +247,7 @@ class NerfMLP(nn.Module):
         #                         width=self.alpha_branch_width,
         #                         skips=self.skips,
         #                         )
+
         self.alpha_mlp = nn.Linear(self.alpha_branch_width+self.alpha_condition_dim, self.alpha_channels)
         nn.init.xavier_uniform_(self.alpha_mlp.weight)
         
@@ -276,7 +277,6 @@ class NerfMLP(nn.Module):
         # bottleneck = self.bottleneck_mlp(x)
         #TODO debug
         bottleneck = self.bottleneck_mlp(x)
-        bottleneck = self.hidden_activation(bottleneck)
 
         if alpha_condition is not None:
             alpha_condition = self.broadcast_condition(alpha_condition,x.shape[1])
@@ -284,8 +284,7 @@ class NerfMLP(nn.Module):
         else:
             alpha_input = bottleneck
 
-        # todo when assuming no alpha conditioning,
-        # the input to alpha_mlp should be the bottleneck,ie 256
+
         alpha = self.alpha_mlp(alpha_input)
 
         if rgb_condition is not None:

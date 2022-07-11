@@ -142,3 +142,5 @@ train_orig.py
 *.pkl
 
 ins
+
+configs/
