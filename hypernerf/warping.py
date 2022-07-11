@@ -44,7 +44,7 @@ class TranslationField(nn.Module):
             output_initializer: the initializer for the last output layer.
     """
 
-    def __init__(self,in_ch,min_deg=0,max_deg=8,emded_dim :int= 8, use_posenc_identity=True,
+    def __init__(self,in_ch,min_deg=0,max_deg=8,in_ch_embed :int= 8, use_posenc_identity=True,
                 skips:list=None, depth=6,hidden_channels=128,activation=None,
                 norm=None,hidden_init=None,output_init=None):
         super(TranslationField,self).__init__()
@@ -59,7 +59,7 @@ class TranslationField(nn.Module):
             skips = [4,]
         self.skips = skips
         self.depth = depth
-        self.embed_dim = emded_dim
+        self.embed_dim = in_ch_embed
         self.hidden_channels = hidden_channels
         if activation is None:
             activation = nn.ReLU()
@@ -72,7 +72,7 @@ class TranslationField(nn.Module):
             output_init = functools.partial(nn.init.uniform_,b=1e-4)
         self.output_init = output_init
         self.n_freq = 10 #! hardcoded
-        self.in_ch = model_utils.get_posenc_ch_orig(in_ch,self.n_freq) + emded_dim
+        self.in_ch = model_utils.get_posenc_ch_orig(in_ch,self.n_freq) + in_ch_embed
 
         self.out_ch = 3
         self.mlp = modules.MLP(

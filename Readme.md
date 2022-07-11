@@ -47,7 +47,7 @@ python eval.py --ckpt_path=$CKPT_PATH \
 --scene_name="exp" --img_wh $IMG_W #IMG_H \
 --root_dir "/exp"
 ```
-This will generate a folder in `result` directory with the rendered images and a gif of the result.
+This will generate a folder in `result` directory with the rendered images and a gif of the result. Note that you have to pass the same set of arguments as in the training command to load the model.
 
 ## Implementation details
 This repo is a by-product of one of my research projects, therefore I do not have much time to precisely replicate the original implementation. Most notably, the following are different from the original implementation:

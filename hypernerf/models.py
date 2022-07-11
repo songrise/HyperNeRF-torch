@@ -216,11 +216,11 @@ class NerfModel(nn.Module):
             if not self.hyper_use_warp_embed:
                 self.hyper_embed = self.hyper_embed_cls(
                     num_embeddings=max(self.embeddings_dict[self.hyper_embed_key]) + 1)
-            self.hyper_sheet_mlp = self.hyper_sheet_mlp_cls(out_ch=self.hyper_sheet_out_dim)
+            self.hyper_sheet_mlp = self.hyper_sheet_mlp_cls(out_ch=self.hyper_sheet_out_dim,in_ch_embed=GLO_dim)
 
         if self.use_warp:
             #TODO pass embed dim as param
-            self.warp_field = self.warp_field_cls(in_ch=3)# 3 for xyz
+            self.warp_field = warping.TranslationField(in_ch=3,in_ch_embed=GLO_dim)
         
         self.alpha_default = 0.0
         # calculate the dimension of the input
@@ -291,6 +291,7 @@ class NerfModel(nn.Module):
                 rgb_activation = self.rgb_activation,
                 alpha_condition_dim=GLO_dim if self.use_nerf_embed else 0,
                 rgb_condition_dim=self.nerf_in_ch_view)
+                
         self.nerf_mlps_coarse = nerf_mlps_coarse
         self.nerf_mlps_fine = nerf_mlps_fine
 

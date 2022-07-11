@@ -62,7 +62,7 @@ def get_opts():
                             choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
     ###########################
     #### params for embedding ####
-    parser.add_argument("--meta_GLO",type=int,default=8,
+    parser.add_argument("--meta_GLO",type=int,default=16,
                             help="the dimension used for GLO embedding of time")
     parser.add_argument("--xyz_fourier",type=int,default=10,
                             help="the dimension used for fourier embedding of points xyz")
