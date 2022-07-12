@@ -63,7 +63,7 @@ class NeRFSystem(LightningModule):
                             xyz_fourier_dim = hparams.xyz_fourier,
                             hyper_fourier_dim = hparams.hyper_fourier,
                             view_fourier_dim= hparams.view_fourier,
-
+                            cond_from_head= hparams.nerf_cond_from_head,
                             )
                             #when use warp, remember to include the hyper sheet
 

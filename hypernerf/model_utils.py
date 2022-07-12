@@ -106,57 +106,6 @@ def volumetric_rendering(rgb,
     }
     return out
 
-# def piecewise_constant_pdf(bins, weights, num_coarse_samples,
-#                            use_stratified_sampling):
-#     """Piecewise-Constant PDF sampling.
-
-#     Args:
-
-#         bins: jnp.ndarray(float32), [batch_size, n_bins + 1].
-#         weights: jnp.ndarray(float32), [batch_size, n_bins].
-#         num_coarse_samples: int, the number of samples.
-#         use_stratified_sampling: bool, use use_stratified_sampling samples.
-
-#     Returns:
-#         z_samples: jnp.ndarray(float32), [batch_size, num_coarse_samples].
-#     """
-#     eps = 1e-5
-
-#     # Get pdf
-#     weights = weights + eps  # prevent nans
-#     pdf = weights / weights.sum(dim=-1, keepdims=True)
-#     cdf = torch.cumsum(pdf, dim=-1)
-#     cdf = torch.cat([torch.zeros(list(cdf.shape[:-1]) + [1], device = weights.device), cdf], dim=-1)
-
-#     # Take uniform samples
-#     if use_stratified_sampling:
-#         u = torch.rand(list(cdf.shape[:-1]) + [num_coarse_samples],device = weights.device)
-#     else:
-#         u = torch.linspace(0., 1., num_coarse_samples, device = weights.device)
-#         new_shape =  cdf.shape[:-1] + [num_coarse_samples]
-#         u = u.expand(*new_shape)
-#     # Invert CDF. This takes advantage of the fact that `bins` is sorted.
-#     mask = (u[..., None, :] >= cdf[..., :, None])
-
-#     def minmax(x):
-#         #todo check whether keep dim
-#         x0,_ = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), dim=-2)
-#         x1,_ = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), dim=-2)
-#         x0 = torch.minimum(x0, x[..., -2:-1])
-#         x1 = torch.maximum(x1, x[..., 1:2])
-#         return x0, x1
-
-#     bins_g0, bins_g1 = minmax(bins)
-#     cdf_g0, cdf_g1 = minmax(cdf)
-
-#     denom = (cdf_g1 - cdf_g0)
-#     one_ = torch.scalar_tensor(1., device = weights.device)
-#     denom = torch.where(denom < eps, one_, denom)
-#     t = (u - cdf_g0) / denom
-#     z_samples = bins_g0 + t * (bins_g1 - bins_g0)
-
-#     return z_samples
-
 def piecewise_constant_pdf(bins, weights, num_coarse_samples,
                            use_stratified_sampling):
     """Piecewise-Constant PDF sampling.
@@ -362,7 +311,7 @@ def compute_depth_map(weights, z_vals, depth_threshold=0.5):
     return torch.sum(opaqueness_mask * z_vals, dim=-1)
 
 
-def prepare_ray_dict(rays:torch.Tensor)->dict:
+def prepare_ray_dict(rays:torch.Tensor,time:int = 0)->dict:
     """convert the nerf-pl ray tensor into a dictionary, so that it is 
        compatible with the hypernerf forward pass.
     
@@ -388,7 +337,7 @@ def prepare_ray_dict(rays:torch.Tensor)->dict:
     dir = rays[:,3:6]
     near = rays[0,6]
     far = rays[0,7]
-    idx = torch.ones((B,1),dtype=torch.long,device=rays.device) #dummy index
+    idx = torch.ones((B,1),dtype=torch.long,device=rays.device)*time #dummy index
     if use_meta:
         idx = rays[:,8].type(torch.long)
     #todo: temporarily forge the metadata

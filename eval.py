@@ -40,7 +40,7 @@ def get_opts():
                         help='number of additional fine samples')
     parser.add_argument('--use_disp', default=False, action="store_true",
                         help='use disparity depth sampling')
-    parser.add_argument('--chunk', type=int, default=1024,
+    parser.add_argument('--chunk', type=int, default=2048,
                         help='chunk size to split the input to avoid OOM')
 
     parser.add_argument('--ckpt_path', type=str, 
@@ -57,13 +57,24 @@ def get_opts():
     #### params for warp ####
     parser.add_argument('--use_warp', type=bool, default=True,
                         help='whether to use warping')
+    parser.add_argument('--hyper_slice_out_dim', type=int, default=4,
+                            help='The output dimension of the hypersheet mlp')
     parser.add_argument('--slice_method', type=str, default='bendy_sheet',
                             help='method to slice the hyperspace, must be used with warping',
                             choices=['bendy_sheet', 'none', 'axis_aligned_plane'])
     ###########################
     #### params for embedding ####
-    parser.add_argument("--meta_GLO",type=int,default=16,
+    parser.add_argument("--meta_GLO_dim",type=int,default=16,
                             help="the dimension used for GLO embedding of time")
+    parser.add_argument("--share_GLO",type=bool,default=True,
+                            help="When set true, all GLO embedding use the same model and key")
+    parser.add_argument("--use_nerf_embedding",action="store_true",
+                            help="whether to use the nerf embedding")
+    parser.add_argument("--use_alpha_condition",action="store_true",
+                            help="whether to use the alpha condition, must be used with use_nerf_embedding")
+    parser.add_argument("--use_rgb_condition",action="store_true",
+                            help="whether to use the rgb condition, must be used with use_nerf_embedding")                     
+
     parser.add_argument("--xyz_fourier",type=int,default=10,
                             help="the dimension used for fourier embedding of points xyz")
     parser.add_argument("--hyper_fourier",type=int,default=6,
@@ -123,15 +134,21 @@ if __name__ == "__main__":
     nerf = NerfModel(
                     embeddings_dict,
                     near = 0.0,
-                    far=1.0, # todo use ndc here
+                    far=1.0, # todo assume ndc here
                     n_samples_coarse=args.N_samples,
                     n_samples_fine=args.N_importance,
                     hyper_slice_method = args.slice_method,
+                    hyper_slice_out_dim = args.hyper_slice_out_dim,
                     use_warp = args.use_warp,
+                    use_nerf_embed= args.use_nerf_embedding,
+                    use_alpha_cond= args.use_alpha_condition,
+                    use_rgb_cond= args.use_rgb_condition,
                     GLO_dim = args.meta_GLO_dim,
+                    share_GLO = args.share_GLO,
                     xyz_fourier_dim = args.xyz_fourier,
                     hyper_fourier_dim = args.hyper_fourier,
                     view_fourier_dim= args.view_fourier,
+                    
                     )
                     
     load_ckpt(nerf, args.ckpt_path, model_name='nerf')

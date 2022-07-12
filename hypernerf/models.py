@@ -48,7 +48,6 @@ def filter_sigma(points, sigma, render_opts):
     """
     if render_opts is None:
         return sigma
-
     # Clamp densities below the set threshold.
     if 'dust_threshold' in render_opts:
         dust_thres = render_opts.get('dust_threshold', 0.0)
@@ -124,6 +123,7 @@ class NerfModel(nn.Module):
             xyz_fourier_dim:int = 10,
             hyper_fourier_dim:int = 6,
             view_fourier_dim:int = 4,
+            cond_from_head:bool = False,
             ):
 
         super(NerfModel,self).__init__()
@@ -160,12 +160,14 @@ class NerfModel(nn.Module):
         self.rgb_channels: int = 3
         self.activation = nn.ReLU()
         self.norm_type: Optional[str] = None
-        self.sigma_activation = nn.Softplus()
+        self.sigma_activation = nn.Softplus()#TODO for experiment
         self.rgb_activation = nn.Sigmoid()
 
         # NeRF metadata configs.
         if share_GLO:
             nerf_use_warp_embed = hyper_use_warp_embed = use_warp
+        else:
+            hyper_use_warp_embed = True #todo alway true for now
 
         self.use_nerf_embed: bool = use_nerf_embed 
         self.nerf_embed_cls: Callable[..., nn.Module] = (
@@ -174,6 +176,7 @@ class NerfModel(nn.Module):
         self.nerf_use_warp_embed: bool = nerf_use_warp_embed
         self.use_alpha_condition: bool = use_alpha_cond 
         self.use_rgb_condition: bool = use_rgb_cond
+        self.nerf_cond_from_head: bool = cond_from_head
         if hyper_slice_method is None:
             self.hyper_slice_method = 'none'
         else:
@@ -252,7 +255,7 @@ class NerfModel(nn.Module):
             hyper_feat_ch = model_utils.get_posenc_ch(self.hyper_sheet_out_dim,
                 min_deg=self.hyper_point_min_deg,
                 max_deg=self.hyper_point_max_deg,
-                use_identity=False, #do not preserve the raw
+                use_identity=False, #do not preserve the raw 
                 alpha=self.alpha_default)
                 
 
@@ -287,7 +290,8 @@ class NerfModel(nn.Module):
                 rgb_channels=self.rgb_channels,
                 rgb_activation = self.rgb_activation,
                 alpha_condition_dim=GLO_dim if self.use_nerf_embed else 0,
-                rgb_condition_dim=self.nerf_cond_ch_rgb)
+                rgb_condition_dim=self.nerf_cond_ch_rgb,
+                cond_from_head=self.nerf_cond_from_head)
 
         if self.num_fine_samples > 0:
             nerf_mlps_fine = modules.NerfMLP(
@@ -645,6 +649,7 @@ class NerfModel(nn.Module):
             metadata,
             extra_params=extra_params,
             metadata_encoded=metadata_encoded)
+
 
         # Filter densities based on rendering options.
         sigma = filter_sigma(points, sigma, render_opts)

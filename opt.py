@@ -106,6 +106,9 @@ def get_opts():
                             help="whether to use the alpha condition, must be used with use_nerf_embedding")
     parser.add_argument("--use_rgb_condition",action="store_true",
                             help="whether to use the rgb condition, must be used with use_nerf_embedding")                     
+    parser.add_argument("--nerf_cond_from_head",action="store_true",
+                            help="input the latent code at the start of NeRF mlp")                     
+
 
     parser.add_argument("--xyz_fourier",type=int,default=10,
                             help="the dimension used for fourier embedding of points xyz")

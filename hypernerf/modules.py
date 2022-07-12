@@ -190,7 +190,7 @@ class NerfMLP(nn.Module):
                 alpha_brach_depth=1,alpha_brach_width=128,alpha_channels=1,
                 skips=None,hidden_activation=None,rgb_activation= None,
                 alpha_condition_dim:int=8,rgb_condition_dim:int=39,
-                norm=None):
+                norm=None, cond_from_head=False):
         super(NerfMLP, self).__init__()
         self.in_ch = in_ch
         self.trunk_depth = trunk_depth
@@ -203,7 +203,7 @@ class NerfMLP(nn.Module):
         self.alpha_channels = alpha_channels
         self.alpha_condition_dim = alpha_condition_dim
         self.rgb_condition_dim = rgb_condition_dim
-        self.condition_density = False
+        self.cond_from_head = cond_from_head
         if skips is None:
             self.skips = [4,]
         self.skips = skips
@@ -220,6 +220,10 @@ class NerfMLP(nn.Module):
 
         self.norm = norm
 
+        #if feed the alpha condition in the begining
+        if self.cond_from_head: 
+            self.in_ch = self.in_ch + self.alpha_condition_dim
+            self.alpha_branch_width = 0
         #todo check this
         self.trunk_mlp = MLP(in_ch=self.in_ch,
                             out_ch=self.trunk_width,
@@ -273,12 +277,14 @@ class NerfMLP(nn.Module):
             Returns:
             raw: [batch, num_coarse_samples, rgb_channels+alpha_channels].
         """
+        if self.cond_from_head:
+            x = torch.cat([x,alpha_condition],dim=-1)
         x = self.trunk_mlp(x)
         # bottleneck = self.bottleneck_mlp(x)
         #TODO debug
         bottleneck = self.bottleneck_mlp(x)
 
-        if alpha_condition is not None:
+        if (not self.cond_from_head) and (alpha_condition is not None):
             alpha_condition = self.broadcast_condition(alpha_condition,x.shape[1])
             alpha_input = torch.cat([bottleneck,alpha_condition],dim=-1)
         else:
@@ -301,7 +307,7 @@ class NerfMLP(nn.Module):
 
 class HyperSheetMLP(nn.Module):
     def __init__(self,in_ch:int=3,in_ch_embed:int=8,out_ch:int=3,depth:int=6,
-                    width:int=64,min_deg:int=0,max_deg:int=1,skips=None,use_residual=False):
+                    width:int=128,min_deg:int=0,max_deg:int=1,skips=None,use_residual=False):
         super(HyperSheetMLP, self).__init__()
         self.out_ch = out_ch
         self.depth = depth
