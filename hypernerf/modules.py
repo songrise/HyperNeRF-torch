@@ -253,7 +253,9 @@ class NerfMLP(nn.Module):
         #                         )
 
         self.alpha_mlp = nn.Linear(self.alpha_branch_width+self.alpha_condition_dim, self.alpha_channels)
-        nn.init.xavier_uniform_(self.alpha_mlp.weight)
+        # nn.init.xavier_uniform_(self.alpha_mlp.weight)
+        #todo for debug
+        nn.init.xavier_normal_(self.alpha_mlp.weight)
         
     def broadcast_condition(self,c,num_samples):
         # Broadcast condition from [batch, feature] to

@@ -58,6 +58,7 @@ class NeRFSystem(LightningModule):
                             use_nerf_embed= hparams.use_nerf_embedding,
                             use_alpha_cond= hparams.use_alpha_condition,
                             use_rgb_cond= hparams.use_rgb_condition,
+                            use_view_dirs=hparams.use_viewdirs,
                             GLO_dim = hparams.meta_GLO_dim,
                             share_GLO = hparams.share_GLO,
                             xyz_fourier_dim = hparams.xyz_fourier,

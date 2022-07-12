@@ -123,6 +123,7 @@ class NerfModel(nn.Module):
             xyz_fourier_dim:int = 10,
             hyper_fourier_dim:int = 6,
             view_fourier_dim:int = 4,
+            use_view_dirs:bool=True,
             cond_from_head:bool = False,
             ):
 
@@ -132,7 +133,7 @@ class NerfModel(nn.Module):
         self.far = far
 
         # NeRF architecture.
-        self.use_viewdirs: bool = True
+        self.use_viewdirs: bool = use_view_dirs
         self.noise_std = noise_std
         self.nerf_trunk_depth: int = 8
         self.nerf_trunk_width: int = 256
@@ -266,13 +267,16 @@ class NerfModel(nn.Module):
         else:
             #TODO for embedding debug            
             self.nerf_in_ch_pos = model_utils.get_posenc_ch_orig(3,self.xyz_freq)
-            self.nerf_cond_ch_rgb = model_utils.get_posenc_ch_orig(3,self.dir_freq)
+            self.nerf_cond_ch_rgb = 0
+            if self.use_viewdirs:
+                self.nerf_cond_ch_rgb += model_utils.get_posenc_ch_orig(3,self.dir_freq)
             # embedding dimension for hyper points.
             self.hyper_feat_ch = model_utils.get_posenc_ch_orig(self.hyper_sheet_out_dim,self.hyper_freq)
             if self.use_warp:
                 self.nerf_in_ch_pos += self.hyper_feat_ch # ! the input channel for the template NeRF
-            if self.use_rgb_condition:
+            if self.use_rgb_condition: #! use GLO embedding and fourier feature at same time
                 self.nerf_cond_ch_rgb += GLO_dim
+            
         
 
         #TODO temp not used and not implemented

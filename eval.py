@@ -14,6 +14,7 @@ import metrics
 
 from datasets import dataset_dict
 from datasets.depth_utils import *
+from utils.visualization import visualize_depth
 
 torch.backends.cudnn.benchmark = True
 
@@ -74,13 +75,17 @@ def get_opts():
                             help="whether to use the alpha condition, must be used with use_nerf_embedding")
     parser.add_argument("--use_rgb_condition",action="store_true",
                             help="whether to use the rgb condition, must be used with use_nerf_embedding")                     
+    parser.add_argument("--use_viewdirs",type = bool, default=True,
+                            help="whether to use the 5D input for Nerf")    
 
     parser.add_argument("--xyz_fourier",type=int,default=10,
                             help="the dimension used for fourier embedding of points xyz")
     parser.add_argument("--hyper_fourier",type=int,default=6,
                             help="the dimension used for fourier embedding of points hyper feature")
-    parser.add_argument("--view_fourier",type=int,default=6,
+    parser.add_argument("--view_fourier",type=int,default=4,
                         help="the dimension used for fourier embedding of view dir ")
+    parser.add_argument("--nerf_cond_from_head",action="store_true",
+                            help="input the latent code at the start of NeRF trunk mlp")     
 
     return parser.parse_args()
 
@@ -143,18 +148,20 @@ if __name__ == "__main__":
                     use_nerf_embed= args.use_nerf_embedding,
                     use_alpha_cond= args.use_alpha_condition,
                     use_rgb_cond= args.use_rgb_condition,
+                    use_view_dirs= args.use_viewdirs,
                     GLO_dim = args.meta_GLO_dim,
                     share_GLO = args.share_GLO,
                     xyz_fourier_dim = args.xyz_fourier,
                     hyper_fourier_dim = args.hyper_fourier,
                     view_fourier_dim= args.view_fourier,
-                    
+                    cond_from_head= args.nerf_cond_from_head,
                     )
                     
     load_ckpt(nerf, args.ckpt_path, model_name='nerf')
     nerf.cuda().eval()
 
     imgs = []
+    depths = []
     psnrs = []
     dir_name = f'results/{args.dataset_name}/{args.scene_name}'
     os.makedirs(dir_name, exist_ok=True)
@@ -170,18 +177,22 @@ if __name__ == "__main__":
 
         img_pred = results['fine']['rgb'].view(h, w, 3).cpu().numpy()
         
-        if args.save_depth:
-            depth_pred = results['fine']['depth'].view(h, w).cpu().numpy()
-            depth_pred = np.nan_to_num(depth_pred)
-            if args.depth_format == 'pfm':
-                save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
-            else:
-                with open(f'depth_{i:03d}', 'wb') as f:
-                    f.write(depth_pred.tobytes())
+        if True:
+            depth_pred = results['fine']['depth'].view(h, w)
+            depth_pred_vis = visualize_depth(depth_pred)
+            depth_pred_vis = depth_pred_vis.permute(1, 2, 0).cpu().numpy()
+            print(depth_pred_vis.shape)
+            depths+=[depth_pred_vis]
+            # if args.depth_format == 'pfm':
+            #     save_pfm(os.path.join(dir_name, f'depth_{i:03d}.pfm'), depth_pred)
+            # else:
+            #     with open(f'depth_{i:03d}', 'wb') as f:
+            #         f.write(depth_pred.tobytes())
 
         img_pred_ = (img_pred*255).astype(np.uint8)
         imgs += [img_pred_]
         imageio.imwrite(os.path.join(dir_name, f'{i:03d}.png'), img_pred_)
+        imageio.imwrite(os.path.join(dir_name, f'{i:03d}_depth.png'), depth_pred_vis)
 
         if 'rgbs' in sample:
             rgbs = sample['rgbs']
@@ -189,7 +200,7 @@ if __name__ == "__main__":
             psnrs += [metrics.psnr(img_gt, img_pred).item()]
         
     imageio.mimsave(os.path.join(dir_name, f'{args.scene_name}.gif'), imgs, fps=30)
-    
+    imageio.mimsave(os.path.join(dir_name, f'{args.scene_name}_depth.gif'), depths, fps=30)
     if psnrs:
         mean_psnr = np.mean(psnrs)
         print(f'Mean PSNR : {mean_psnr:.2f}')

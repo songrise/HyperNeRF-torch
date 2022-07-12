@@ -1,0 +1,137 @@
+nohup python eval.py --ckpt_path="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed_3/epoch=19.ckpt" \
+--scene_name="fangzhou_embed_3" --img_wh 270 480 \
+--root_dir "/root/autodl-tmp/data/fangzhou_nature" &
+
+
+
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 540 960 --N_importance 128 --exp_name fangzhou_embed_2 \
+    --decay_step 5 10 --decay_gamma 0.5 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --precision=16 --num_gpus 1 &
+
+
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 270 480 --N_importance 128 --exp_name fangzhou_embed_3 \
+    --decay_step 5 10 --decay_gamma 0.5 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --meta_GLO_dim=16 --batch_size=2048 \
+    --precision 16 --num_gpus 2 
+    --use_nerf_embedding &
+
+#eval the upper model
+python eval.py --ckpt_path="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed_3/epoch=19.ckpt" \
+    --scene_name="fangzhou_embed_5" --img_wh 135 240 \
+    --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --hyper_slice_out_dim 2 \
+    --share_GLO False \
+    --meta_GLO_dim 16 \
+    --use_nerf_embedding --use_alpha_condition 
+
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 270 480 --N_importance 128 --exp_name fangzhou_embed_5 \
+    --decay_step 5 10 --decay_gamma 0.5 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --meta_GLO_dim 64 --batch_size 2048 \
+    --precision 16 --num_gpus 3 \
+    --hyper_fourier 7 \
+    --hyper_slice_out_dim 2\
+    --share_GLO True \
+    --use_nerf_embedding --use_alpha_condition &
+
+#eval the upper model
+python eval.py --ckpt_path="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed_5/epoch=7.ckpt" \
+    --scene_name="fangzhou_embed_5" --img_wh 135 240 \
+    --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --hyper_slice_out_dim 2 \
+    --share_GLO True \
+    --meta_GLO_dim 64 \
+    --hyper_fourier 7 \
+    --use_nerf_embedding --use_alpha_condition
+
+
+
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 270 480 --N_importance 128 --exp_name fangzhou_embed_6 \
+    --decay_step 5 10 --decay_gamma 0.5 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --meta_GLO_dim 64 --batch_size 2048 \
+    --precision 16 --num_gpus 3 \
+    --hyper_fourier 7 \
+    --hyper_slice_out_dim 2\
+    --share_GLO False \
+    --use_nerf_embedding --use_alpha_condition &
+
+#eval the upper model
+python eval.py --ckpt_path="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed_6/epoch=16.ckpt" \
+    --scene_name="fangzhou_embed_6_white" --img_wh 135 240 \
+    --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --use_warp=True \
+    --hyper_slice_out_dim 2 \
+    --share_GLO True \
+    --meta_GLO_dim 64 \
+    --hyper_fourier 7 \
+    --share_GLO False \
+    --use_nerf_embedding --use_alpha_condition
+
+# strictly follow the suggested params
+# also the sigma activation is relu!
+# also using width 128 for slice
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 270 480 --N_importance 64 --exp_name fangzhou_embed_7 \
+    --decay_step 5 10 --decay_gamma 0.5 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --meta_GLO_dim 128 --batch_size 2048 \
+    --precision 16 --num_gpus 3 \
+    --hyper_fourier 7 \
+    --hyper_slice_out_dim 2 \
+    --share_GLO False &
+
+#eval the upper model
+python eval.py --ckpt_path="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed_7/epoch=11.ckpt" \
+    --scene_name="fangzhou_embed_7" --img_wh 135 240 \
+    --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --use_warp=True \
+    --hyper_slice_out_dim 2 \
+    --meta_GLO_dim 128 \
+    --hyper_fourier 7 \
+    --view_fourier 6 \
+    --share_GLO False 
+
+#! for no view fourier, others follow embed_3 (with warp embedding)
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 270 480 --N_importance 128 --exp_name fangzhou_embed_8 \
+    --decay_step 8 16 --decay_gamma 0.5 --lr 5e-4 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --meta_GLO_dim 16 --batch_size 2048 \
+    --precision 16 --num_gpus 3 \
+    --hyper_fourier 5 \
+    --hyper_slice_out_dim 4 \
+    --view_fourier 1 \
+    --use_viewdirs False \
+    --share_GLO False  --use_nerf_embedding --use_alpha_condition &
+
+python eval.py --ckpt_path="/root/autodl-tmp/HyperNeRF-torch/ckpts/fangzhou_embed_8/epoch=8-v3.ckpt" \
+    --scene_name="fangzhou_embed_8" --img_wh 135 240 \
+    --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --use_warp=True \
+    --hyper_slice_out_dim 2 \
+    --meta_GLO_dim 16 \
+    --hyper_slice_out_dim 4 \
+    --hyper_fourier 5 \
+    --view_fourier 1 \
+    --share_GLO False  --use_nerf_embedding --use_alpha_condition \
+    --use_viewdirs False 
+
+#! Same as previous, but better quality
+nohup python train.py --root_dir "/root/autodl-tmp/data/fangzhou_nature" \
+    --img_wh 270 480 --N_importance 128 --exp_name fangzhou_n_nodir \
+    --decay_step 10 20 --decay_gamma 0.5 --lr 5e-4 \
+    --use_warp=True --slice_method "bendy_sheet" \
+    --meta_GLO_dim 16 --batch_size 2048 \
+    --precision 16 --num_gpus 3 \
+    --hyper_fourier 5 \
+    --hyper_slice_out_dim 4 \
+    --view_fourier 1 \
+    --use_viewdirs False \
+    --share_GLO False  --use_nerf_embedding --use_alpha_condition &

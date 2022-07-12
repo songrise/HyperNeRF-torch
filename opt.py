@@ -103,17 +103,19 @@ def get_opts():
     parser.add_argument("--use_nerf_embedding",action="store_true",
                             help="whether to use the nerf embedding")
     parser.add_argument("--use_alpha_condition",action="store_true",
-                            help="whether to use the alpha condition, must be used with use_nerf_embedding")
+                            help="whether to use the GLO alpha condition, must be used with use_nerf_embedding")
     parser.add_argument("--use_rgb_condition",action="store_true",
-                            help="whether to use the rgb condition, must be used with use_nerf_embedding")                     
+                            help="whether to use the GLO rgb condition, must be used with use_nerf_embedding")        
+    parser.add_argument("--use_viewdirs",type = bool, default=True,
+                            help="whether to use the 5D input for Nerf")                                         
     parser.add_argument("--nerf_cond_from_head",action="store_true",
-                            help="input the latent code at the start of NeRF mlp")                     
+                            help="input the latent code at the start of NeRF trunk mlp")                     
 
 
     parser.add_argument("--xyz_fourier",type=int,default=10,
                             help="the dimension used for fourier embedding of points xyz")
-    parser.add_argument("--hyper_fourier",type=int,default=6,
+    parser.add_argument("--hyper_fourier",type=int,default=5,
                             help="the dimension used for fourier embedding of points hyper feature")
-    parser.add_argument("--view_fourier",type=int,default=6,
+    parser.add_argument("--view_fourier",type=int,default=4,
                         help="the dimension used for fourier embedding of view dir ")
     return parser.parse_args()
