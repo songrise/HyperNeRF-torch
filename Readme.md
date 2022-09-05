@@ -18,7 +18,7 @@ IMPORTANT： this is a working repo, the code is not finished yet.
 3. Install the dependencies. `pip install -r requirements.txt` 
 
 ## Training
-Currently, we only support LLFF-style dataset training. That is, we use the LLFF file structure for dataset loading, but the scene does not necessarily be static. If you already have a LLFF dataset, we do not require any changes and you can directly train the model. If you have a Nerfies dataset, you may need to convert it to LLFF format, follow the guide in [this repo](https://github.com/kwea123/nerf_pl/tree/dev).
+Currently, we only support [LLFF-style](https://github.com/Fyusion/LLFF) dataset training. That is, we use the LLFF file structure for dataset loading, but the scene does not necessarily be static. If you already have a LLFF dataset, we do not require any changes and you can directly train the model. If you have a Nerfies dataset, you may need to convert it to LLFF format, follow the guide in [this repo](https://github.com/kwea123/nerf_pl/tree/dev). If you have a COLMAP dataset, convert it into [LLFF style](https://github.com/Fyusion/LLFF). If you have raw image sequence, run [COLMAP](https://github.com/colmap/colmap) for sparse reconstruction.
 
 ### [Optional] Data download
 If you do not have your own llff style dataset, you can get one [here](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1).
@@ -53,7 +53,7 @@ This will generate a folder in `result` directory with the rendered images and a
 This repo is a by-product of one of my research projects, therefore I do not have much time to precisely replicate the original implementation. Most notably, the following are different from the original implementation:
 
 - SE3-field coded but not debugged yet. For warping, we currently use Translation field.
-- We generate the metadata of the rays (e.g, warp embedding key) in the code, instead of reading it from the file.
+- We generate the metadata of the rays (e.g, warp embedding key) in run time, instead of reading it from the file.
 - We use the original positional encoding scheme in NeRF, instead of the one used in HyperNeRF.
 - We did not implement the code that loads Nerfies-style dataset
 
